@@ -1,40 +1,41 @@
+import 'package:flutter/foundation.dart';
 // lib/services/ocr_service.dart
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
-import 'package:google_ml_kit/google_ml_kit.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
 class OCRService {
-  final TextRecognizer _textRecognizer = GoogleMlKit.vision.textRecognizer();
+  final TextRecognizer _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
 
   // Extract CNIC number only from image
   Future<CNICData> extractCNICData(File imageFile) async {
     try {
-      print('🔍 Starting OCR with Google ML Kit...');
+      debugPrint('🔍 Starting OCR with Google ML Kit...');
 
       String fullText = '';
       List<String> allLines = [];
 
       // Approach 1: Direct OCR
-      print('📷 Approach 1: Direct OCR');
+      debugPrint('📷 Approach 1: Direct OCR');
       final result1 = await _performOCR(imageFile);
       if (result1.isNotEmpty) {
         fullText = result1;
         allLines = fullText.split('\n');
-        print('📝 Direct OCR Result:\n$fullText');
+        debugPrint('📝 Direct OCR Result:\n$fullText');
       }
 
       // Approach 2: If no text detected, try with image preprocessing
       if (fullText.length < 5) {
-        print('📷 Approach 2: Preprocessed Image OCR');
+        debugPrint('📷 Approach 2: Preprocessed Image OCR');
         final preprocessedFile = await _preprocessImage(imageFile);
         final result2 = await _performOCR(preprocessedFile);
         if (result2.isNotEmpty && result2.length > fullText.length) {
           fullText = result2;
           allLines = fullText.split('\n');
-          print('📝 Preprocessed OCR Result:\n$fullText');
+          debugPrint('📝 Preprocessed OCR Result:\n$fullText');
         }
         if (preprocessedFile.path != imageFile.path) {
           await preprocessedFile.delete();
@@ -43,13 +44,13 @@ class OCRService {
 
       // Approach 3: If still no text, try with different orientation
       if (fullText.length < 5) {
-        print('📷 Approach 3: Rotated Image OCR');
+        debugPrint('📷 Approach 3: Rotated Image OCR');
         final rotatedFile = await _rotateImage(imageFile);
         final result3 = await _performOCR(rotatedFile);
         if (result3.isNotEmpty && result3.length > fullText.length) {
           fullText = result3;
           allLines = fullText.split('\n');
-          print('📝 Rotated OCR Result:\n$fullText');
+          debugPrint('📝 Rotated OCR Result:\n$fullText');
         }
         if (rotatedFile.path != imageFile.path) {
           await rotatedFile.delete();
@@ -62,7 +63,7 @@ class OCRService {
 
       // Extract CNIC Number only
       String cnicNumber = _extractCNICNumber(fullText);
-      print('🆔 Extracted CNIC Number: $cnicNumber');
+      debugPrint('🆔 Extracted CNIC Number: $cnicNumber');
 
       if (cnicNumber.isEmpty) {
         throw Exception('Could not read CNIC number. Please try with a clearer image.');
@@ -76,7 +77,7 @@ class OCRService {
         isUrdu: _containsUrdu(fullText),
       );
     } catch (e) {
-      print('❌ OCR Error: $e');
+      debugPrint('❌ OCR Error: $e');
       throw Exception('Failed to read CNIC: $e');
     }
   }
@@ -95,7 +96,7 @@ class OCRService {
       }
       return fullText;
     } catch (e) {
-      print('⚠️ OCR failed: $e');
+      debugPrint('⚠️ OCR failed: $e');
       return '';
     }
   }
@@ -109,7 +110,7 @@ class OCRService {
       await tempFile.writeAsBytes(bytes);
       return tempFile;
     } catch (e) {
-      print('⚠️ Preprocessing failed: $e');
+      debugPrint('⚠️ Preprocessing failed: $e');
       return imageFile;
     }
   }
@@ -123,7 +124,7 @@ class OCRService {
       await tempFile.writeAsBytes(bytes);
       return tempFile;
     } catch (e) {
-      print('⚠️ Rotation failed: $e');
+      debugPrint('⚠️ Rotation failed: $e');
       return imageFile;
     }
   }

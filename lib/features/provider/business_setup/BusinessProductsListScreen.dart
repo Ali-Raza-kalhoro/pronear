@@ -328,11 +328,14 @@ class _BusinessProductsListScreenState extends State<BusinessProductsListScreen>
       final images = product['images'] as List? ?? [];
       for (var imageUrl in images) {
         try {
-          final uri = Uri.parse(imageUrl);
-          final path = uri.pathSegments.last;
+          // ✅ take the full path after the bucket name (works for old and new folders)
+          final segments = Uri.parse(imageUrl).pathSegments;
+          final bucketIndex = segments.indexOf('profiles');
+          if (bucketIndex == -1) continue;
+          final path = segments.sublist(bucketIndex + 1).join('/');
           await Supabase.instance.client.storage
               .from('profiles')
-              .remove(['business/products/$path']);
+              .remove([path]);
         } catch (e) {
           // Ignore storage deletion errors
         }

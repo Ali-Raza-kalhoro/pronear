@@ -50,7 +50,6 @@ class _RequestScreenState extends State<RequestScreen>
     _loadProviderAndLocation();
     _loadPortfolio();
 
-    // Background Animations
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 3000),
@@ -177,7 +176,7 @@ class _RequestScreenState extends State<RequestScreen>
         latitude = position.latitude;
         longitude = position.longitude;
       } catch (e) {
-        print('⚠️ Could not get location: $e');
+        debugPrint('⚠️ Could not get location: $e');
       }
 
       final aiResult = SupabaseService().classifyRequest(_descriptionController.text);
@@ -463,6 +462,7 @@ class _RequestScreenState extends State<RequestScreen>
     );
   }
 
+  // ✅ TRANSPARENT TEXT FIELD (Matches the product setup / registration style)
   Widget _buildInputField({
     required TextEditingController controller,
     required String label,
@@ -483,63 +483,47 @@ class _RequestScreenState extends State<RequestScreen>
           ),
         ),
         const SizedBox(height: 6),
-        Container(
-          decoration: BoxDecoration(
+        TextFormField(
+          controller: controller,
+          keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+          maxLines: maxLines,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
             color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
           ),
-          child: TextFormField(
-            controller: controller,
-            keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-            maxLines: maxLines,
-            style: const TextStyle(
-              color: Colors.black,
-              fontSize: 15,
-              fontWeight: FontWeight.w500,
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(
+              color: Colors.white.withOpacity(0.5),
+              fontSize: 14,
             ),
-            decoration: InputDecoration(
-              hintText: hint,
-              hintStyle: TextStyle(
-                color: Colors.grey.shade400,
-                fontSize: 14,
-              ),
-              prefixIcon: Icon(
-                icon,
-                color: const Color(0xFF38804f),
-                size: 22,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(
-                  color: Colors.grey.shade300,
-                  width: 1,
-                ),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(
-                  color: Colors.grey.shade300,
-                  width: 1,
-                ),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(
-                  color: Color(0xFF49e8c3),
-                  width: 2,
-                ),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 16,
-              ),
+            prefixIcon: Icon(
+              icon,
+              color: const Color(0xFF49e8c3),
+              size: 22,
+            ),
+            filled: true,
+            fillColor: Colors.white.withOpacity(0.1),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Colors.white, width: 2),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Colors.red, width: 1),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Colors.red, width: 2),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 16,
             ),
           ),
         ),
@@ -579,7 +563,6 @@ class _RequestScreenState extends State<RequestScreen>
           ),
           child: Stack(
             children: [
-              // Decorative glows
               Positioned(
                 top: -80,
                 right: -80,
@@ -599,7 +582,6 @@ class _RequestScreenState extends State<RequestScreen>
               ),
               Column(
                 children: [
-                  // Header
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -1099,9 +1081,7 @@ class _RequestScreenState extends State<RequestScreen>
           SafeArea(
             child: Column(
               children: [
-                // ============================================================
-                // CUSTOM APP BAR
-                // ============================================================
+                // Custom App Bar
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: Row(
@@ -1161,9 +1141,7 @@ class _RequestScreenState extends State<RequestScreen>
                   ),
                 ),
 
-                // ============================================================
-                // MAIN CONTENT
-                // ============================================================
+                // Main Content
                 Expanded(
                   child: SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
@@ -1171,9 +1149,7 @@ class _RequestScreenState extends State<RequestScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ============================================================
-                        // PROVIDER INFO CARD
-                        // ============================================================
+                        // Provider Info Card
                         _buildGlassCard(
                           child: Padding(
                             padding: const EdgeInsets.all(16),
@@ -1296,9 +1272,7 @@ class _RequestScreenState extends State<RequestScreen>
                           ),
                         ),
 
-                        // ============================================================
-                        // PORTFOLIO
-                        // ============================================================
+                        // Portfolio
                         if (_isLoadingPortfolio)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 16),
@@ -1317,9 +1291,7 @@ class _RequestScreenState extends State<RequestScreen>
 
                         const SizedBox(height: 24),
 
-                        // ============================================================
-                        // DESCRIPTION
-                        // ============================================================
+                        // Description
                         _buildInputField(
                           controller: _descriptionController,
                           label: 'Describe Your Issue',
@@ -1329,9 +1301,7 @@ class _RequestScreenState extends State<RequestScreen>
                         ),
                         const SizedBox(height: 16),
 
-                        // ============================================================
-                        // BUDGET
-                        // ============================================================
+                        // Budget
                         _buildInputField(
                           controller: _budgetController,
                           label: 'Budget (Optional)',
@@ -1341,9 +1311,7 @@ class _RequestScreenState extends State<RequestScreen>
                         ),
                         const SizedBox(height: 16),
 
-                        // ============================================================
-                        // PREFERRED TIME
-                        // ============================================================
+                        // Preferred Time
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -1361,27 +1329,24 @@ class _RequestScreenState extends State<RequestScreen>
                               child: Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  color: Colors.white.withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(14),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.05),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 4),
-                                    ),
-                                  ],
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.3),
+                                    width: 1,
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
                                     Container(
                                       padding: const EdgeInsets.all(10),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFF38804f).withOpacity(0.1),
+                                        color: const Color(0xFF49e8c3).withOpacity(0.15),
                                         borderRadius: BorderRadius.circular(10),
                                       ),
                                       child: const Icon(
                                         Icons.access_time_rounded,
-                                        color: Color(0xFF38804f),
+                                        color: Color(0xFF49e8c3),
                                         size: 20,
                                       ),
                                     ),
@@ -1395,14 +1360,14 @@ class _RequestScreenState extends State<RequestScreen>
                                           fontSize: 15,
                                           fontWeight: FontWeight.w500,
                                           color: _selectedTime != null
-                                              ? const Color(0xFF2D3748)
-                                              : Colors.grey.shade400,
+                                              ? Colors.white
+                                              : Colors.white.withOpacity(0.4),
                                         ),
                                       ),
                                     ),
                                     Icon(
                                       Icons.keyboard_arrow_down_rounded,
-                                      color: Colors.grey.shade400,
+                                      color: Colors.white.withOpacity(0.4),
                                       size: 24,
                                     ),
                                   ],
@@ -1413,9 +1378,7 @@ class _RequestScreenState extends State<RequestScreen>
                         ),
                         const SizedBox(height: 16),
 
-                        // ============================================================
-                        // URGENCY
-                        // ============================================================
+                        // Urgency
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -1485,9 +1448,7 @@ class _RequestScreenState extends State<RequestScreen>
                         ),
                         const SizedBox(height: 28),
 
-                        // ============================================================
-                        // SUBMIT BUTTON
-                        // ============================================================
+                        // Submit Button
                         SizedBox(
                           width: double.infinity,
                           height: 56,

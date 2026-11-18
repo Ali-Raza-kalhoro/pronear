@@ -401,7 +401,7 @@ class _BusinessRequestScreenState extends State<BusinessRequestScreen>
         latitude = position.latitude;
         longitude = position.longitude;
       } catch (e) {
-        print('⚠️ Could not get location: $e');
+        debugPrint('⚠️ Could not get location: $e');
       }
 
       final requestData = {

@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/theme.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/services/global_error_handler.dart'; // ✅ Added for error handling
 import '../../provider/auth_provider.dart';
 
 class BusinessTypeSelectionScreen extends StatefulWidget {
@@ -45,6 +46,9 @@ class _BusinessTypeSelectionScreenState extends State<BusinessTypeSelectionScree
     super.dispose();
   }
 
+  // ============================================================
+  // BACKGROUND (Updated to match green theme)
+  // ============================================================
   Widget _buildBackground(Size size) {
     return Positioned.fill(
       child: IgnorePointer(
@@ -56,10 +60,10 @@ class _BusinessTypeSelectionScreenState extends State<BusinessTypeSelectionScree
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Color(0xFF1A1040),
-                    Color(0xFF2D1B69),
-                    Color(0xFF1A0B2E),
-                    Color(0xFF0F0A2A),
+                    Color(0xFF38804f), // ✅ Green start
+                    Color(0xFF1d3b27), // ✅ Dark green
+                    Color(0xFF1d3b27),
+                    Color(0xFF38804f), // ✅ Green end
                   ],
                   stops: [0.0, 0.35, 0.70, 1.0],
                 ),
@@ -449,57 +453,55 @@ class _BusinessTypeSelectionScreenState extends State<BusinessTypeSelectionScree
 
     setState(() => _isLoading = true);
 
-    try {
-      final authProvider = context.read<AuthProvider>();
-      final userId = authProvider.userId;
+    // ✅ Wrap the logic in GlobalErrorHandler to catch internet/database errors
+    final success = await GlobalErrorHandler.run<bool>(
+      context: context,
+      action: () async {
+        final authProvider = context.read<AuthProvider>();
+        final userId = authProvider.userId;
 
-      if (userId == null) {
-        throw Exception('User not logged in');
-      }
+        if (userId == null) {
+          throw Exception('User not logged in');
+        }
 
-      final isBusiness = _selectedType == 'business';
+        final isBusiness = _selectedType == 'business';
 
-      // ✅ Update user
-      await Supabase.instance.client
-          .from('users')
-          .update({
-        'role': 'provider',
-        'is_business': isBusiness,
-        'business_type': _selectedType,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', userId);
-
-      // ✅ Get or create provider
-      final provider = await SupabaseService().getProviderByUserId(userId);
-
-      if (provider != null) {
+        // Update user
         await Supabase.instance.client
-            .from('providers')
+            .from('users')
             .update({
-          'business_type': _selectedType,
+          'role': 'provider',
           'is_business': isBusiness,
+          'business_type': _selectedType,
           'updated_at': DateTime.now().toIso8601String(),
-        }).eq('id', provider['id']);
-      }
+        }).eq('id', userId);
 
+        // Get or create provider
+        final provider = await SupabaseService().getProviderByUserId(userId);
+
+        if (provider != null) {
+          await Supabase.instance.client
+              .from('providers')
+              .update({
+            'business_type': _selectedType,
+            'is_business': isBusiness,
+            'updated_at': DateTime.now().toIso8601String(),
+          }).eq('id', provider['id']);
+        }
+        return true;
+      },
+    );
+
+    if (success == true && mounted) {
       if (_selectedType == 'business') {
         context.go('/business/setup');
       } else {
         context.go('/provider/cv');
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: ${e.toString()}'),
-          backgroundColor: Colors.red.shade400,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      );
-    } finally {
-      setState(() => _isLoading = false);
+    } else {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 }

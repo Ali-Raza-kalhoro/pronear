@@ -74,7 +74,7 @@ class ProviderProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      print('🔍 ProviderProvider: Loading providers...');
+      debugPrint('🔍 ProviderProvider: Loading providers...');
 
       // Try to get providers with location
       var result = await _service.getNearbyProviders(
@@ -87,16 +87,16 @@ class ProviderProvider extends ChangeNotifier {
 
       // If no providers found, try getting all providers
       if (result.isEmpty) {
-        print('⚠️ No providers with location, loading all...');
+        debugPrint('⚠️ No providers with location, loading all...');
         result = await _service.getAllProviders();
       }
 
       _providers = result;
-      print('✅ ProviderProvider: Loaded ${_providers.length} providers');
+      debugPrint('✅ ProviderProvider: Loaded ${_providers.length} providers');
       _isLoading = false;
       notifyListeners();
     } catch (e) {
-      print('❌ ProviderProvider Error: $e');
+      debugPrint('❌ ProviderProvider Error: $e');
       _error = e.toString();
       _isLoading = false;
       notifyListeners();

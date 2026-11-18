@@ -18,9 +18,14 @@ class ChatProvider extends ChangeNotifier {
   // Cache for user profiles to attach to real-time messages
   final Map<String, Map<String, dynamic>> _userCache = {};
 
+  // ✅ Track locally deleted message IDs (delete for me)
+  final Set<String> _locallyDeletedIds = {};
+
   // Getters
   List<Map<String, dynamic>> get rooms => _rooms;
-  List<Map<String, dynamic>> get messages => _messages;
+  List<Map<String, dynamic>> get messages => _messages
+      .where((m) => !_locallyDeletedIds.contains(m['id']))
+      .toList();
   bool get isLoading => _isLoading;
   bool get isSending => _isSending;
   String? get error => _error;
@@ -28,7 +33,6 @@ class ChatProvider extends ChangeNotifier {
   // ============================================================
   // ROOMS
   // ============================================================
-
   Future<void> loadRooms(String userId, String role) async {
     _isLoading = true;
     _error = null;
@@ -48,16 +52,12 @@ class ChatProvider extends ChangeNotifier {
   void subscribeToRooms(String userId, String role) {
     _roomsSubscription?.cancel();
     _roomsSubscription = _service.listenToChatRooms(userId, role).listen(
-      (updatedRooms) async {
-        // Since the stream only gives raw room data, we should ideally 
-        // refresh the whole list to get joined user/provider info, 
-        // or manually fetch missing info. 
-        // For simplicity and correctness of UI, we re-fetch the detailed rooms.
+          (updatedRooms) async {
         try {
           _rooms = await _service.getChatRooms(userId, role);
           notifyListeners();
         } catch (e) {
-          print('Error refreshing rooms: $e');
+          debugPrint('Error refreshing rooms: $e');
         }
       },
       onError: (error) {
@@ -78,7 +78,6 @@ class ChatProvider extends ChangeNotifier {
   // ============================================================
   // MESSAGES
   // ============================================================
-
   Future<void> loadMessages(String roomId) async {
     _isLoading = true;
     _error = null;
@@ -87,15 +86,14 @@ class ChatProvider extends ChangeNotifier {
     try {
       final fetchedMessages = await _service.getMessages(roomId);
       _messages = fetchedMessages;
-      
-      // Cache user info from messages
+
       for (var msg in fetchedMessages) {
         if (msg['users'] != null) {
           final String uid = msg['sender_id'];
           _userCache[uid] = Map<String, dynamic>.from(msg['users']);
         }
       }
-      
+
       _isLoading = false;
       notifyListeners();
     } catch (e) {
@@ -108,8 +106,7 @@ class ChatProvider extends ChangeNotifier {
   void subscribeToMessages(String roomId) {
     _messageSubscription?.cancel();
     _messageSubscription = _service.listenToMessages(roomId).listen(
-      (newRawMessages) {
-        // Map raw messages to include cached user info
+          (newRawMessages) {
         _messages = newRawMessages.map((msg) {
           final String senderId = msg['sender_id'];
           final updatedMsg = Map<String, dynamic>.from(msg);
@@ -118,7 +115,7 @@ class ChatProvider extends ChangeNotifier {
           }
           return updatedMsg;
         }).toList();
-        
+
         notifyListeners();
       },
       onError: (error) {
@@ -135,8 +132,6 @@ class ChatProvider extends ChangeNotifier {
     String? type,
     String? mediaUrl,
   }) async {
-    // Note: We don't set _isSending to true if we want optimistic updates,
-    // but here we follow the existing pattern.
     _isSending = true;
     _error = null;
     notifyListeners();
@@ -157,18 +152,35 @@ class ChatProvider extends ChangeNotifier {
     try {
       await _service.markMessagesAsRead(roomId, userId);
     } catch (e) {
-      print('Error marking messages as read: $e');
+      debugPrint('Error marking messages as read: $e');
+    }
+  }
+
+  // ============================================================
+  // ✅ DELETE MESSAGE HELPERS
+  // ============================================================
+  void deleteForMe(String messageId) {
+    _locallyDeletedIds.add(messageId);
+    notifyListeners();
+  }
+
+  Future<void> deleteForEveryone(String messageId) async {
+    try {
+      await _service.deleteMessageForEveryone(messageId);
+      notifyListeners();
+    } catch (e) {
+      throw Exception('Failed to delete message for everyone: $e');
     }
   }
 
   // ============================================================
   // DISPOSE / CLEANUP
   // ============================================================
-
   void disposeMessages() {
     _messageSubscription?.cancel();
     _messageSubscription = null;
     _messages = [];
+    _locallyDeletedIds.clear();
     notifyListeners();
   }
 
@@ -186,6 +198,7 @@ class ChatProvider extends ChangeNotifier {
     _roomsSubscription = null;
     _rooms = [];
     _messages = [];
+    _locallyDeletedIds.clear();
     _isLoading = false;
     _isSending = false;
     _error = null;

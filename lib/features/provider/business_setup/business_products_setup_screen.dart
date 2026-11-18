@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/theme.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/services/global_error_handler.dart'; // ✅ Added for permissions
 import '../../provider/auth_provider.dart';
 
 class BusinessProductsSetupScreen extends StatefulWidget {
@@ -72,6 +73,9 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
     super.dispose();
   }
 
+  // ============================================================
+  // BACKGROUND (Matches Home Screen Theme)
+  // ============================================================
   Widget _buildBackground(Size size) {
     return Positioned.fill(
       child: IgnorePointer(
@@ -83,10 +87,10 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Color(0xFF1A1040),
-                    Color(0xFF2D1B69),
-                    Color(0xFF1A0B2E),
-                    Color(0xFF0F0A2A),
+                    Color(0xFF38804f),
+                    Color(0xFF1d3b27),
+                    Color(0xFF1d3b27),
+                    Color(0xFF38804f),
                   ],
                   stops: [0.0, 0.35, 0.70, 1.0],
                 ),
@@ -209,7 +213,7 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: Colors.white.withOpacity(
-                        isEven ? 0.10 : 0.055,
+                        isEven ? 0.35 : 0.055,
                       ),
                     ),
                   );
@@ -238,7 +242,14 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
     });
   }
 
+  // ============================================================
+  // IMAGE PICKER (With Permissions)
+  // ============================================================
   Future<void> _pickImages() async {
+    // ✅ Check Gallery Permission First
+    final hasPermission = await GlobalErrorHandler.requestGallery(context);
+    if (!hasPermission) return;
+
     final List<XFile>? images = await _picker.pickMultiImage(
       imageQuality: 80,
       maxWidth: 1024,
@@ -264,11 +275,13 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
   Future<List<String>> _uploadImages() async {
     List<String> urls = [];
 
-    for (var image in _productImages) {
+    for (var i = 0; i < _productImages.length; i++) {
+      final image = _productImages[i];
       try {
         final bytes = await image.readAsBytes();
-        final fileName = 'product_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final filePath = 'business/products/$fileName';
+        // ✅ index in name: several images in the same millisecond no longer collide
+        final fileName = 'product_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
+        final filePath = '${Supabase.instance.client.auth.currentUser!.id}/business/products/$fileName'; // ✅ owner folder
 
         await Supabase.instance.client.storage
             .from('profiles')
@@ -291,20 +304,14 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
     return urls;
   }
 
+  // ============================================================
+  // SAVE PRODUCT
+  // ============================================================
   Future<void> _saveProducts() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     if (_productImages.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Please add at least one product image'),
-          backgroundColor: Colors.orange,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      );
+      GlobalErrorHandler.showCustomError('Please add at least one product image');
       return;
     }
 
@@ -358,30 +365,21 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
           .insert(productData);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('✅ Product added successfully!'),
-            backgroundColor: Color(0xFF49e8c3),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        );
+        GlobalErrorHandler.showCustomSuccess('Product added successfully!');
 
         final addMore = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            backgroundColor: Colors.white,
+            backgroundColor: const Color(0xFF1d3b27), // Matched dark theme
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
-            title: const Text('Add More Products?'),
-            content: const Text('Would you like to add another product?'),
+            title: const Text('Add More Products?', style: TextStyle(color: Colors.white)),
+            content: const Text('Would you like to add another product?', style: TextStyle(color: Colors.white70)),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text('No, Go to Dashboard'),
+                child: const Text('No, Go to Dashboard', style: TextStyle(color: Colors.white54)),
               ),
               ElevatedButton(
                 onPressed: () => Navigator.pop(context, true),
@@ -405,7 +403,9 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
         }
       }
     } catch (e) {
-      setState(() => _errorMessage = e.toString());
+      if (mounted) {
+        setState(() => _errorMessage = e.toString());
+      }
     } finally {
       if (mounted) {
         setState(() => _isSaving = false);
@@ -431,16 +431,16 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFF1d3b27), // Matched dark theme
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
-        title: const Text('Skip for now?'),
-        content: const Text('You can add products later from your dashboard.'),
+        title: const Text('Skip for now?', style: TextStyle(color: Colors.white)),
+        content: const Text('You can add products later from your dashboard.', style: TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -502,7 +502,7 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
                     ),
                     const SizedBox(height: 16),
 
-                    // Header
+                    // Header (Glassmorphism)
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -542,9 +542,9 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
                                 ),
                                 Text(
                                   widget.category?['name'] ?? 'Product',
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 13,
-                                    color: const Color(0xFF49e8c3),
+                                    color: Color(0xFF49e8c3),
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -648,7 +648,7 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
+        color: Colors.white.withOpacity(0.06), // Glassmorphism
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withOpacity(0.08),
@@ -727,7 +727,7 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
+        color: Colors.white.withOpacity(0.06), // Glassmorphism
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withOpacity(0.08),
@@ -773,7 +773,7 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
+        color: Colors.white.withOpacity(0.06), // Glassmorphism
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: Colors.white.withOpacity(0.08),
@@ -823,52 +823,60 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
         TextInputType? keyboardType,
         bool required = true,
       }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+    return TextFormField(
+      controller: controller,
+      maxLines: maxLines,
+      keyboardType: keyboardType,
+      style: const TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w500,
+        color: Colors.white, // ✅ White text like registration screen
       ),
-      child: TextFormField(
-        controller: controller,
-        maxLines: maxLines,
-        keyboardType: keyboardType,
-        style: const TextStyle(
-          fontSize: 15,
-          color: Color(0xFF2D3748),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(
+          color: Colors.white70, // ✅ Translucent white label
+          fontSize: 13,
         ),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: TextStyle(
-            fontSize: 12,
-            color: Colors.grey.shade600,
-          ),
-          prefixIcon: Icon(
-            icon,
-            color: const Color(0xFF49e8c3),
-            size: 20,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.grey.shade300, width: 1),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.grey.shade300, width: 1),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFF49e8c3), width: 2),
-          ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          isDense: true,
+        hintText: 'Enter $label',
+        hintStyle: TextStyle(
+          color: Colors.white.withOpacity(0.5),
+          fontSize: 14,
         ),
-        validator: (value) {
-          if (required && (value == null || value.trim().isEmpty)) {
-            return 'Required';
-          }
-          return null;
-        },
+        prefixIcon: Icon(
+          icon,
+          color: Colors.white70, // ✅ Translucent white icon
+          size: 22,
+        ),
+        filled: true,
+        fillColor: Colors.white.withOpacity(0.1), // ✅ Transparent glass background
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.3)), // ✅ Translucent border
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.white, width: 2), // ✅ Solid white on focus
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.red, width: 1),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.red, width: 2),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
       ),
+      validator: (value) {
+        if (required && (value == null || value.trim().isEmpty)) {
+          return 'Required';
+        }
+        return null;
+      },
     );
   }
 
@@ -882,10 +890,10 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
             height: 120,
             width: double.infinity,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.04),
+              color: Colors.white.withOpacity(0.1), // ✅ Transparent background
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: Colors.white.withOpacity(0.06),
+                color: Colors.white.withOpacity(0.3), // ✅ Translucent border
                 width: 1,
               ),
             ),
@@ -896,20 +904,20 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
                 Icon(
                   Icons.cloud_upload_outlined,
                   size: 40,
-                  color: Colors.white.withOpacity(0.3),
+                  color: Colors.white.withOpacity(0.7), // ✅ White icon
                 ),
                 const SizedBox(height: 6),
                 Text(
                   'Tap to upload images',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.4),
+                    color: Colors.white.withOpacity(0.8),
                     fontSize: 13,
                   ),
                 ),
                 Text(
                   'Add up to 5 images',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.3),
+                    color: Colors.white.withOpacity(0.5),
                     fontSize: 11,
                   ),
                 ),
@@ -966,7 +974,7 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
             '${_productImages.length} image(s) selected',
             style: TextStyle(
               fontSize: 11,
-              color: Colors.white.withOpacity(0.4),
+              color: Colors.white.withOpacity(0.7),
             ),
           ),
       ],
@@ -981,7 +989,7 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
             Text(
               'No quantity options added',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.4),
+                color: Colors.white.withOpacity(0.6),
                 fontSize: 13,
               ),
             ),
@@ -1009,12 +1017,12 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
           final option = entry.value;
           return Container(
             margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.04),
-              borderRadius: BorderRadius.circular(10),
+              color: Colors.white.withOpacity(0.1), // ✅ Transparent glass
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: Colors.white.withOpacity(0.06),
+                color: Colors.white.withOpacity(0.3), // ✅ Translucent border
                 width: 1,
               ),
             ),
@@ -1023,12 +1031,16 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
                 Expanded(
                   child: TextField(
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: Colors.white, // ✅ White text
                       fontSize: 14,
                     ),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Quantity (e.g., 1000L)',
-                      labelStyle: TextStyle(color: Colors.white54, fontSize: 11),
+                      labelStyle: TextStyle(
+                        color: Colors.white.withOpacity(0.7),
+                        fontSize: 12,
+                      ),
+                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
                       border: InputBorder.none,
                       isDense: true,
                     ),
@@ -1043,12 +1055,16 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
                 Expanded(
                   child: TextField(
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: Colors.white, // ✅ White text
                       fontSize: 14,
                     ),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Price (PKR)',
-                      labelStyle: TextStyle(color: Colors.white54, fontSize: 11),
+                      labelStyle: TextStyle(
+                        color: Colors.white.withOpacity(0.7),
+                        fontSize: 12,
+                      ),
+                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.4)),
                       border: InputBorder.none,
                       isDense: true,
                     ),
@@ -1062,7 +1078,7 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
                 ),
                 if (_quantityOptions.length > 1)
                   IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.red, size: 18),
+                    icon: const Icon(Icons.close_rounded, color: Colors.red, size: 20),
                     onPressed: () => _removeQuantityOption(index),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
@@ -1071,7 +1087,7 @@ class _BusinessProductsSetupScreenState extends State<BusinessProductsSetupScree
             ),
           );
         }),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         ElevatedButton(
           onPressed: _addQuantityOption,
           style: ElevatedButton.styleFrom(

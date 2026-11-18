@@ -1,8 +1,10 @@
 // lib/features/auth/register_screen.dart
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/animation.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
@@ -12,15 +14,17 @@ import '../../app/theme.dart';
 import '../../widgets/loading_button.dart';
 import '../provider/auth_provider.dart';
 import '../../core/services/supabase_service.dart';
+import '../../core/services/global_error_handler.dart'; // ✅ Added Global Error Handler
 import 'face_recoganization.dart';
 import 'ocr_service.dart';
 
 enum RegisterStep {
+  emailVerification,
   cnicUpload,
   cnicVerification,
   facialVerification,
   personalInfo,
-  completion
+  completion,
 }
 
 class RegisterScreen extends StatefulWidget {
@@ -48,6 +52,17 @@ class _RegisterScreenState extends State<RegisterScreen>
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
+  // Email OTP verification state
+  final List<TextEditingController> _otpControllers =
+  List.generate(6, (_) => TextEditingController());
+  final List<FocusNode> _otpFocusNodes = List.generate(6, (_) => FocusNode());
+  bool _isOtpVerifying = false;
+  bool _isSendingOtp = false;
+  bool _emailOtpVerified = false;
+  String? _otpVerifiedEmail;
+  Timer? _otpResendTimer;
+  int _otpResendCountdown = 0;
+
   // CNIC Data
   String? _cnicNumber;
   String? _cnicName;
@@ -70,22 +85,18 @@ class _RegisterScreenState extends State<RegisterScreen>
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _isLoading = false;
-  RegisterStep _currentRegisterStep = RegisterStep.cnicUpload;
+  bool _acceptedLegal = false; // ✅ must accept Privacy Policy + Terms
+  RegisterStep _currentRegisterStep = RegisterStep.emailVerification;
   String? _errorMessage;
   double _progressValue = 0.0;
 
-  // ✅ Track if user is provider or business (both need verification)
   bool get _isProvider => widget.role == 'provider' || widget.role == 'business';
   bool get _isCustomer => widget.role == 'user';
-
-  // ✅ Get the actual role for navigation
   String get _actualRole => widget.role ?? 'user';
 
   @override
   void initState() {
     super.initState();
-
-    // Initialize animation controllers
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
@@ -96,13 +107,8 @@ class _RegisterScreenState extends State<RegisterScreen>
       duration: const Duration(seconds: 4),
     )..repeat();
 
-    _progressValue = 0.1;
-
-    // ✅ If customer, skip CNIC and face verification
-    if (_isCustomer) {
-      _currentRegisterStep = RegisterStep.personalInfo;
-      _progressValue = 0.3;
-    }
+    _currentRegisterStep = RegisterStep.emailVerification;
+    _progressValue = 0.05;
   }
 
   @override
@@ -116,6 +122,13 @@ class _RegisterScreenState extends State<RegisterScreen>
     _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    for (final c in _otpControllers) {
+      c.dispose();
+    }
+    for (final f in _otpFocusNodes) {
+      f.dispose();
+    }
+    _otpResendTimer?.cancel();
     super.dispose();
   }
 
@@ -148,9 +161,11 @@ class _RegisterScreenState extends State<RegisterScreen>
               child: AnimatedBuilder(
                 animation: _pulseController,
                 builder: (context, child) {
-                  final opacity = 0.15 + (0.08 * (1 + math.sin(
-                    _pulseController.value * math.pi * 2,
-                  )) / 2);
+                  final opacity = 0.15 +
+                      (0.08 *
+                          (1 +
+                              math.sin(_pulseController.value * math.pi * 2)) /
+                          2);
                   return Container(
                     width: 350,
                     height: 350,
@@ -187,9 +202,7 @@ class _RegisterScreenState extends State<RegisterScreen>
             AnimatedBuilder(
               animation: _floatingController,
               builder: (context, child) {
-                final value = math.sin(
-                  _floatingController.value * math.pi * 2,
-                );
+                final value = math.sin(_floatingController.value * math.pi * 2);
                 return Positioned(
                   top: 140 + value * 15,
                   right: 30,
@@ -211,9 +224,7 @@ class _RegisterScreenState extends State<RegisterScreen>
             AnimatedBuilder(
               animation: _floatingController,
               builder: (context, child) {
-                final value = math.sin(
-                  _floatingController.value * math.pi * 2,
-                );
+                final value = math.sin(_floatingController.value * math.pi * 2);
                 return Positioned(
                   bottom: 50 + value * 15,
                   left: 30,
@@ -310,9 +321,306 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   // ============================================================
-  // CNIC UPLOAD (Only for Providers/Business)
+  // EMAIL OTP VERIFICATION
+  // ============================================================
+  void _startOtpResendTimer() {
+    _otpResendTimer?.cancel();
+    setState(() => _otpResendCountdown = 60);
+    _otpResendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_otpResendCountdown <= 1) {
+        timer.cancel();
+        setState(() => _otpResendCountdown = 0);
+      } else {
+        setState(() => _otpResendCountdown--);
+      }
+    });
+  }
+
+  Future<void> _sendVerificationOtp() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty ||
+        !RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email)) {
+      setState(() => _errorMessage = 'Please enter a valid email address');
+      return;
+    }
+
+    setState(() {
+      _isSendingOtp = true;
+      _errorMessage = null;
+    });
+
+    final success = await GlobalErrorHandler.run<bool>(
+      context: context,
+      action: () async {
+        await Supabase.instance.client.auth.signInWithOtp(
+          email: email,
+          shouldCreateUser: true,
+        );
+        return true;
+      },
+    );
+    if (success == true && mounted) {
+      setState(() {
+        _otpVerifiedEmail = email;
+        _isSendingOtp = false;
+      });
+      _startOtpResendTimer();
+
+      Future.delayed(const Duration(milliseconds: 400), () {
+        if (mounted && _otpFocusNodes.isNotEmpty) {
+          _otpFocusNodes[0].requestFocus();
+        }
+      });
+    } else {
+      setState(() => _isSendingOtp = false);
+    }
+  }
+
+  Future<void> _verifyEmailOtp() async {
+    final otp = _otpControllers.map((c) => c.text).join();
+    if (otp.length != 6) {
+      setState(() => _errorMessage = 'Please enter the full 6-digit OTP');
+      return;
+    }
+
+    setState(() {
+      _isOtpVerifying = true;
+      _errorMessage = null;
+    });
+
+    final response = await GlobalErrorHandler.run<AuthResponse>(
+      context: context,
+      action: () async {
+        return await Supabase.instance.client.auth.verifyOTP(
+          email: _otpVerifiedEmail ?? _emailController.text.trim(),
+          token: otp,
+          type: OtpType.email,
+        );
+      },
+    );
+
+    if (response?.user != null && mounted) {
+      setState(() {
+        _emailOtpVerified = true;
+        _isOtpVerifying = false;
+        if (_isProvider) {
+          _currentRegisterStep = RegisterStep.cnicUpload;
+          _progressValue = 0.2;
+        } else {
+          _currentRegisterStep = RegisterStep.personalInfo;
+          _progressValue = 0.6;
+        }
+      });
+    } else {
+      setState(() => _isOtpVerifying = false);
+    }
+  }
+
+  void _onOtpDigitChanged(int index, String value) {
+    if (value.length == 1 && index < 5) {
+      _otpFocusNodes[index + 1].requestFocus();
+    } else if (value.isEmpty && index > 0) {
+      _otpFocusNodes[index - 1].requestFocus();
+    }
+    final otp = _otpControllers.map((c) => c.text).join();
+    if (otp.length == 6) _verifyEmailOtp();
+  }
+
+  Widget _buildEmailVerification() {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildProgressBar(),
+          const SizedBox(height: 24),
+          Text(
+            'Verify Your Email',
+            style: AppTextStyles.headline2.copyWith(color: Colors.white),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Enter your email address. We\'ll send you a 6-digit OTP code to verify it.',
+            style: AppTextStyles.bodyMedium.copyWith(
+              color: Colors.white.withOpacity(0.8),
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 28),
+
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: TextFormField(
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              enabled: _otpVerifiedEmail == null,
+              style: const TextStyle(
+                color: Colors.black,
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+              ),
+              decoration: InputDecoration(
+                labelText: 'Email Address',
+                hintText: 'Enter your email',
+                prefixIcon: const Icon(
+                  Icons.email_outlined,
+                  color: Color(0xFF49e8c3),
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 16,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          if (_otpVerifiedEmail == null)
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: LoadingButton(
+                onPressed: _sendVerificationOtp,
+                isLoading: _isSendingOtp,
+                label: 'Send OTP',
+                backgroundColor: Colors.white,
+                textColor: const Color(0xFF38804f),
+              ),
+            )
+          else ...[
+            Text(
+              'Enter the 6-digit code sent to',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.6),
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _otpVerifiedEmail!,
+              style: const TextStyle(
+                color: Color(0xFF49e8c3),
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: List.generate(6, (index) {
+                return SizedBox(
+                  width: 46,
+                  height: 56,
+                  child: TextFormField(
+                    controller: _otpControllers[index],
+                    focusNode: _otpFocusNodes[index],
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    maxLength: 1,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black,
+                    ),
+                    decoration: InputDecoration(
+                      counterText: '',
+                      filled: true,
+                      fillColor: Colors.white,
+                      contentPadding: EdgeInsets.zero,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: Color(0xFF49e8c3),
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                    onChanged: (value) => _onOtpDigitChanged(index, value),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: LoadingButton(
+                onPressed: _verifyEmailOtp,
+                isLoading: _isOtpVerifying,
+                label: 'Verify Email',
+                backgroundColor: const Color(0xFF49e8c3),
+                textColor: Colors.black,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Center(
+              child: _otpResendCountdown > 0
+                  ? Text(
+                'Resend in ${_otpResendCountdown}s',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.5),
+                  fontSize: 13,
+                ),
+              )
+                  : TextButton(
+                onPressed: () {
+                  setState(() {
+                    _otpVerifiedEmail = null;
+                    for (final c in _otpControllers) {
+                      c.clear();
+                    }
+                    _errorMessage = null;
+                  });
+                },
+                child: const Text(
+                  'Change email / resend',
+                  style: TextStyle(
+                    color: Color(0xFF49e8c3),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 16),
+          TextButton(
+            onPressed: () => context.pop(),
+            child: const Text(
+              'Back to Login',
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // CNIC UPLOAD (With Permissions)
   // ============================================================
   Future<void> _pickCnicImage(String side) async {
+    // ✅ Check Permission Before Opening Camera
+    final hasPermission = await GlobalErrorHandler.requestCamera(context);
+    if (!hasPermission) return;
+
     final picker = ImagePicker();
     final image = await picker.pickImage(
       source: ImageSource.camera,
@@ -328,7 +636,6 @@ class _RegisterScreenState extends State<RegisterScreen>
         } else {
           _cnicBackImage = image.path;
         }
-        // Reset verification status when new image is uploaded
         _isCnicVerified = false;
         _isCnicAlreadyRegistered = false;
         _cnicNumber = null;
@@ -338,9 +645,6 @@ class _RegisterScreenState extends State<RegisterScreen>
     }
   }
 
-  // ============================================================
-  // CNIC VERIFICATION (OCR) - Only for Providers/Business
-  // ============================================================
   Future<void> _processCnicImages() async {
     if (_cnicFrontImage == null || _cnicBackImage == null) {
       setState(() {
@@ -356,171 +660,172 @@ class _RegisterScreenState extends State<RegisterScreen>
       _existingUser = null;
     });
 
-    try {
-      // Extract CNIC data using OCR
-      final cnicData = await _ocrService.extractCNICData(
-        File(_cnicFrontImage!),
-      );
+    final cnicData = await GlobalErrorHandler.run<CNICData>(
+      context: context,
+      action: () async {
+        return await _ocrService.extractCNICData(File(_cnicFrontImage!));
+      },
+    );
 
-      if (cnicData.cnicNumber.isEmpty) {
-        setState(() {
-          _errorMessage = 'Could not read CNIC. Please try with a clearer image.';
-          _isCnicProcessing = false;
-        });
-        return;
-      }
+    if (cnicData == null || cnicData.cnicNumber.isEmpty) {
+      setState(() {
+        _errorMessage = 'Could not read CNIC. Please try with a clearer image.';
+        _isCnicProcessing = false;
+      });
+      return;
+    }
 
-      // Check if CNIC already registered
-      final supabase = SupabaseService();
-      final existingUser = await supabase.getUserByCNIC(cnicData.cnicNumber);
+    final supabase = SupabaseService();
+    final existingUser = await GlobalErrorHandler.run<Map<String, dynamic>?>(
+      context: context,
+      action: () async => await supabase.getUserByCNIC(cnicData.cnicNumber),
+    );
+
+    setState(() {
+      _cnicNumber = cnicData.cnicNumber;
+      _cnicName = cnicData.fullName.isNotEmpty ? cnicData.fullName : null;
+      _cnicDob = cnicData.dateOfBirth;
+      _isCnicProcessing = false;
+      _currentRegisterStep = RegisterStep.cnicVerification;
+      _progressValue = 0.35;
 
       if (existingUser != null) {
-        // CNIC is already registered
-        setState(() {
-          _isCnicAlreadyRegistered = true;
-          _existingUser = existingUser;
-          _cnicNumber = cnicData.cnicNumber;
-          _cnicName = cnicData.fullName.isNotEmpty ? cnicData.fullName : 'User';
-          _cnicDob = cnicData.dateOfBirth;
-          _isCnicProcessing = false;
-          _isCnicVerified = false;
-          _currentRegisterStep = RegisterStep.cnicVerification;
-          _progressValue = 0.3;
-        });
-        return;
-      }
-
-      // CNIC is not registered, proceed with verification
-      setState(() {
-        _cnicNumber = cnicData.cnicNumber;
-        _cnicName = cnicData.fullName.isNotEmpty ? cnicData.fullName : 'User';
-        _cnicDob = cnicData.dateOfBirth;
-        _isCnicVerified = true;
+        _isCnicAlreadyRegistered = true;
+        _existingUser = existingUser;
+        _isCnicVerified = false;
+      } else {
         _isCnicAlreadyRegistered = false;
-        _isCnicProcessing = false;
-        _currentRegisterStep = RegisterStep.cnicVerification;
-        _progressValue = 0.3;
-      });
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to verify CNIC: $e';
-        _isCnicProcessing = false;
-      });
-    }
+        _isCnicVerified = true;
+      }
+    });
   }
 
   // ============================================================
-  // FACIAL VERIFICATION (Only for Providers/Business)
+  // FACE VERIFICATION (With Permissions)
   // ============================================================
   Future<void> _captureAndVerifyFace() async {
+    // ✅ Check Permission Before Opening Camera
+    final hasPermission = await GlobalErrorHandler.requestCamera(context);
+    if (!hasPermission) return;
+
     setState(() {
       _isFaceCapturing = true;
       _errorMessage = null;
       _faceVerificationMessage = 'Capturing face...';
     });
 
-    try {
-      final picker = ImagePicker();
-      final image = await picker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: 720,
-        maxHeight: 720,
-        imageQuality: 70,
-      );
+    final picker = ImagePicker();
+    final image = await picker.pickImage(
+      source: ImageSource.camera,
+      maxWidth: 720,
+      maxHeight: 720,
+      imageQuality: 70,
+    );
 
-      if (image == null) {
-        setState(() {
-          _isFaceCapturing = false;
-          _faceVerificationMessage = null;
-        });
-        return;
-      }
-
+    if (image == null) {
       setState(() {
-        _faceImage = image.path;
-        _faceVerificationMessage = 'Verifying face...';
-      });
-
-      // Verify face
-      final result = await _faceService.verifyFace(File(image.path));
-
-      if (result.isVerified) {
-        setState(() {
-          _isFaceVerified = true;
-          _faceEmbedding = result.faceEmbedding;
-          _faceVerificationMessage = '✅ ${result.message}';
-          _isFaceCapturing = false;
-          _currentRegisterStep = RegisterStep.personalInfo;
-          _progressValue = 0.7;
-        });
-      } else {
-        setState(() {
-          _faceVerificationMessage = '❌ ${result.message}';
-          _isFaceCapturing = false;
-        });
-        // Allow retry
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            setState(() {
-              _faceVerificationMessage = null;
-            });
-          }
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _errorMessage = 'Failed to verify face: $e';
         _isFaceCapturing = false;
         _faceVerificationMessage = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _faceImage = image.path;
+      _faceVerificationMessage = 'Verifying face...';
+    });
+
+    final result = await GlobalErrorHandler.run<FaceVerificationResult>(
+      context: context,
+      action: () async => await _faceService.verifyFace(File(image.path)),
+    );
+
+    if (result != null && result.isVerified) {
+      setState(() {
+        _isFaceVerified = true;
+        _faceEmbedding = result.faceEmbedding;
+        _faceVerificationMessage = '✅ ${result.message}';
+        _isFaceCapturing = false;
+        _currentRegisterStep = RegisterStep.personalInfo;
+        _progressValue = 0.7;
+      });
+    } else {
+      setState(() {
+        _faceVerificationMessage = '❌ ${result?.message ?? "Verification failed"}';
+        _isFaceCapturing = false;
+      });
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          setState(() {
+            _faceVerificationMessage = null;
+          });
+        }
       });
     }
   }
 
   // ============================================================
-  // COMPLETE REGISTRATION
+  // COMPLETE REGISTRATION (With Global Error Handling)
   // ============================================================
   Future<void> _completeRegistration() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (!_acceptedLegal) {
+      GlobalErrorHandler.showCustomError(
+          'Please accept the Privacy Policy and Terms of Service to continue.');
+      return;
+    }
 
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    try {
-      final authProvider = context.read<AuthProvider>();
-      final supabase = SupabaseService();
+    final success = await GlobalErrorHandler.run<bool>(
+      context: context,
+      action: () async {
+        final authProvider = context.read<AuthProvider>();
+        final supabase = SupabaseService();
 
-      // ✅ For providers/business: Check CNIC is not already registered
-      if (_isProvider) {
-        final existingUser = await supabase.getUserByCNIC(_cnicNumber!);
-        if (existingUser != null) {
-          setState(() {
-            _errorMessage = 'This CNIC is already registered. Please login.';
-            _isLoading = false;
-            _isCnicAlreadyRegistered = true;
-            _existingUser = existingUser;
-            _currentRegisterStep = RegisterStep.cnicVerification;
-          });
-          return;
+        if (_isProvider) {
+          final existingUser = await supabase.getUserByCNIC(_cnicNumber!);
+          if (existingUser != null) {
+            throw Exception('This CNIC is already registered. Please login.');
+          }
         }
-      }
 
-      // Register user with Supabase Auth
-      final success = await authProvider.register(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
-        fullName: _isProvider
-            ? (_cnicName ?? _nameController.text.trim())
-            : _nameController.text.trim(),
-        phone: _phoneController.text.trim(),
-        role: _actualRole, // ✅ Use the actual role
-      );
+        final currentUser = Supabase.instance.client.auth.currentUser;
 
-      if (success && mounted) {
-        final userId = authProvider.userId;
-        if (userId != null) {
-          // ✅ For providers/business: Upload verification images and save data
+        if (currentUser != null &&
+            (currentUser.email ?? '').toLowerCase() ==
+                _emailController.text.trim().toLowerCase()) {
+          await Supabase.instance.client.auth.updateUser(
+            UserAttributes(
+              password: _passwordController.text,
+              data: {
+                'full_name': _nameController.text.trim(),
+                'phone': _phoneController.text.trim(),
+                'role': _actualRole,
+              },
+            ),
+          );
+
+          final userId = currentUser.id;
+          final fullName = _nameController.text.trim();
+
+          // ✅ OTP sign-up never inserts into public.users – make sure the
+          // row exists (otherwise splash logs the user out on next launch).
+          await supabase.ensureUserExists(
+            userId,
+            email: currentUser.email,
+            fullName: fullName,
+            role: _actualRole,
+          );
+          await supabase.updateUserProfile(userId, {
+            'full_name': fullName,
+            if (_phoneController.text.trim().isNotEmpty)
+              'phone': _phoneController.text.trim(),
+          });
+
           if (_isProvider) {
             final frontImageUrl = await supabase.uploadVerificationImage(
               userId,
@@ -540,7 +845,6 @@ class _RegisterScreenState extends State<RegisterScreen>
               File(_faceImage!),
             );
 
-            // Save verification data
             await supabase.saveUserWithVerification(
               userId: userId,
               cnicNumber: _cnicNumber!,
@@ -550,36 +854,38 @@ class _RegisterScreenState extends State<RegisterScreen>
               faceEmbedding: _faceEmbedding!,
             );
           }
+          return true;
+        } else {
+          final res = await authProvider.register(
+            email: _emailController.text.trim(),
+            password: _passwordController.text,
+            fullName: _nameController.text.trim(),
+            phone: _phoneController.text.trim(),
+            role: _actualRole,
+          );
+          if (!res) throw Exception(authProvider.error ?? 'Registration failed');
+          return true;
         }
+      },
+    );
 
-        setState(() {
-          _currentRegisterStep = RegisterStep.completion;
-          _progressValue = 1.0;
-          _isLoading = false;
-        });
-
-        // ✅ Navigate based on role
-        await Future.delayed(const Duration(seconds: 1));
-        if (mounted) {
-          if (_isProvider) {
-            // ✅ For both 'provider' and 'business' roles, go to business setup
-            context.go('/business/type');
-          } else {
-            // ✅ For 'user' role, go to user home
-            context.go('/user/home');
-          }
-        }
-      } else {
-        setState(() {
-          _errorMessage = authProvider.error ?? 'Registration failed';
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
+    if (success == true && mounted) {
       setState(() {
-        _errorMessage = e.toString();
+        _currentRegisterStep = RegisterStep.completion;
+        _progressValue = 1.0;
         _isLoading = false;
       });
+
+      await Future.delayed(const Duration(seconds: 1));
+      if (mounted) {
+        if (_isProvider) {
+          context.go('/business/type');
+        } else {
+          context.go('/user/home');
+        }
+      }
+    } else {
+      setState(() => _isLoading = false);
     }
   }
 
@@ -625,7 +931,7 @@ class _RegisterScreenState extends State<RegisterScreen>
           else ...[
             _buildCnicUploadCard(
               title: 'CNIC Front',
-              subtitle: 'Upload the f]ront side of your CNIC',
+              subtitle: 'Upload the front side of your CNIC',
               imagePath: _cnicFrontImage,
               onTap: () => _pickCnicImage('front'),
               isUploaded: _cnicFrontImage != null,
@@ -655,7 +961,8 @@ class _RegisterScreenState extends State<RegisterScreen>
                 ),
                 child: const Text(
                   'Verify CNIC',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  style:
+                  TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -705,7 +1012,9 @@ class _RegisterScreenState extends State<RegisterScreen>
                       : Colors.white.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isUploaded ? Colors.green : Colors.white.withOpacity(0.3),
+                    color: isUploaded
+                        ? Colors.green
+                        : Colors.white.withOpacity(0.3),
                   ),
                 ),
                 child: isUploaded && imagePath != null
@@ -717,7 +1026,9 @@ class _RegisterScreenState extends State<RegisterScreen>
                   ),
                 )
                     : Icon(
-                  isUploaded ? Icons.check_circle : Icons.cloud_upload_outlined,
+                  isUploaded
+                      ? Icons.check_circle
+                      : Icons.cloud_upload_outlined,
                   color: isUploaded ? Colors.green : Colors.white70,
                   size: 40,
                 ),
@@ -765,7 +1076,6 @@ class _RegisterScreenState extends State<RegisterScreen>
           _buildProgressBar(),
           const SizedBox(height: 24),
 
-          // Show success or error based on verification status
           Row(
             children: [
               Icon(
@@ -802,7 +1112,6 @@ class _RegisterScreenState extends State<RegisterScreen>
           ),
           const SizedBox(height: 24),
 
-          // Show warning if CNIC is already registered
           if (_isCnicAlreadyRegistered && _existingUser != null)
             Container(
               padding: const EdgeInsets.all(16),
@@ -853,7 +1162,6 @@ class _RegisterScreenState extends State<RegisterScreen>
               ),
             ),
 
-          // Show CNIC info if verified
           if (_isCnicVerified && !_isCnicAlreadyRegistered)
             Card(
               elevation: 2,
@@ -876,7 +1184,6 @@ class _RegisterScreenState extends State<RegisterScreen>
                     ),
                     const SizedBox(height: 16),
                     _buildInfoRow('CNIC Number', _cnicNumber ?? 'N/A'),
-
                     _buildInfoRow('Status', 'Verified ✓'),
                   ],
                 ),
@@ -885,7 +1192,6 @@ class _RegisterScreenState extends State<RegisterScreen>
 
           const SizedBox(height: 32),
 
-          // Show appropriate button
           if (_isCnicAlreadyRegistered)
             SizedBox(
               width: double.infinity,
@@ -894,7 +1200,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                 onPressed: () {
                   setState(() {
                     _currentRegisterStep = RegisterStep.cnicUpload;
-                    _progressValue = 0.1;
+                    _progressValue = 0.2;
                     _cnicNumber = null;
                     _cnicName = null;
                     _cnicDob = null;
@@ -914,7 +1220,8 @@ class _RegisterScreenState extends State<RegisterScreen>
                 ),
                 child: const Text(
                   'Try Another CNIC',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  style:
+                  TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
             )
@@ -938,7 +1245,8 @@ class _RegisterScreenState extends State<RegisterScreen>
                 ),
                 child: const Text(
                   'Continue to Face Verification',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  style:
+                  TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -948,7 +1256,7 @@ class _RegisterScreenState extends State<RegisterScreen>
             onPressed: () {
               setState(() {
                 _currentRegisterStep = RegisterStep.cnicUpload;
-                _progressValue = 0.1;
+                _progressValue = 0.2;
                 _isCnicVerified = false;
                 _isCnicAlreadyRegistered = false;
               });
@@ -1108,9 +1416,12 @@ class _RegisterScreenState extends State<RegisterScreen>
                 _captureAndVerifyFace();
               },
               isLoading: _isFaceCapturing,
-              label: _isFaceVerified ? '✅ Verified' : 'Capture & Verify Face',
-              backgroundColor: _isFaceVerified ? Colors.green : Colors.white,
-              textColor: _isFaceVerified ? Colors.white : const Color(0xFF38804f),
+              label:
+              _isFaceVerified ? '✅ Verified' : 'Capture & Verify Face',
+              backgroundColor:
+              _isFaceVerified ? Colors.green : Colors.white,
+              textColor:
+              _isFaceVerified ? Colors.white : const Color(0xFF38804f),
             ),
           ),
           const SizedBox(height: 16),
@@ -1118,7 +1429,7 @@ class _RegisterScreenState extends State<RegisterScreen>
             onPressed: () {
               setState(() {
                 _currentRegisterStep = RegisterStep.cnicVerification;
-                _progressValue = 0.3;
+                _progressValue = 0.35;
               });
             },
             child: const Text(
@@ -1155,25 +1466,27 @@ class _RegisterScreenState extends State<RegisterScreen>
             ),
             const SizedBox(height: 32),
 
-            // ✅ Show CNIC info only for providers/business
             if (_isProvider) ...[
               _buildReadOnlyField('CNIC Number', _cnicNumber ?? 'N/A'),
               const SizedBox(height: 16),
-
-            ] else ...[
-              // ✅ For customers, they need to enter name
+            ],
+            // ✅ Name is asked from everyone (OCR does not read the name, so
+            // providers were previously saved as "User").
+            ...[
               TextFormField(
                 controller: _nameController,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
                   labelText: 'Full Name *',
                   hintText: 'Enter your full name',
-                  prefixIcon: const Icon(Icons.person_outline, color: Colors.white70),
+                  prefixIcon: const Icon(Icons.person_outline,
+                      color: Colors.white70),
                   labelStyle: const TextStyle(color: Colors.white70),
                   hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                    borderSide:
+                    BorderSide(color: Colors.white.withOpacity(0.3)),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -1183,12 +1496,20 @@ class _RegisterScreenState extends State<RegisterScreen>
                   fillColor: Colors.white.withOpacity(0.1),
                 ),
                 validator: (value) {
-                  if (value?.isEmpty ?? true) return 'Please enter your full name';
+                  if (value?.isEmpty ?? true) {
+                    return 'Please enter your full name';
+                  }
                   return null;
                 },
               ),
               const SizedBox(height: 16),
             ],
+
+            _buildReadOnlyField(
+              'Verified Email',
+              _emailController.text.trim(),
+            ),
+            const SizedBox(height: 16),
 
             TextFormField(
               controller: _phoneController,
@@ -1196,12 +1517,14 @@ class _RegisterScreenState extends State<RegisterScreen>
               decoration: InputDecoration(
                 labelText: 'Phone Number *',
                 hintText: 'Enter your phone number',
-                prefixIcon: const Icon(Icons.phone_outlined, color: Colors.white70),
+                prefixIcon:
+                const Icon(Icons.phone_outlined, color: Colors.white70),
                 labelStyle: const TextStyle(color: Colors.white70),
                 hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                  borderSide:
+                  BorderSide(color: Colors.white.withOpacity(0.3)),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -1212,37 +1535,11 @@ class _RegisterScreenState extends State<RegisterScreen>
               ),
               keyboardType: TextInputType.phone,
               validator: (value) {
-                if (value?.isEmpty ?? true) return 'Please enter your phone number';
-                if (value!.length < 10) return 'Please enter a valid phone number';
-                return null;
-              },
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _emailController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'Email *',
-                hintText: 'Enter your email',
-                prefixIcon: const Icon(Icons.email_outlined, color: Colors.white70),
-                labelStyle: const TextStyle(color: Colors.white70),
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Colors.white),
-                ),
-                filled: true,
-                fillColor: Colors.white.withOpacity(0.1),
-              ),
-              keyboardType: TextInputType.emailAddress,
-              validator: (value) {
-                if (value?.isEmpty ?? true) return 'Please enter your email';
-                if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value!)) {
-                  return 'Please enter a valid email';
+                if (value?.isEmpty ?? true) {
+                  return 'Please enter your phone number';
+                }
+                if (value!.length < 10) {
+                  return 'Please enter a valid phone number';
                 }
                 return null;
               },
@@ -1254,7 +1551,8 @@ class _RegisterScreenState extends State<RegisterScreen>
               decoration: InputDecoration(
                 labelText: 'Password *',
                 hintText: 'Create a password',
-                prefixIcon: const Icon(Icons.lock_outline, color: Colors.white70),
+                prefixIcon:
+                const Icon(Icons.lock_outline, color: Colors.white70),
                 labelStyle: const TextStyle(color: Colors.white70),
                 hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
                 suffixIcon: IconButton(
@@ -1264,11 +1562,13 @@ class _RegisterScreenState extends State<RegisterScreen>
                         : Icons.visibility_off_outlined,
                     color: Colors.white70,
                   ),
-                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                  borderSide:
+                  BorderSide(color: Colors.white.withOpacity(0.3)),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -1279,8 +1579,12 @@ class _RegisterScreenState extends State<RegisterScreen>
               ),
               obscureText: _obscurePassword,
               validator: (value) {
-                if (value?.isEmpty ?? true) return 'Please create a password';
-                if (value!.length < 6) return 'Password must be at least 6 characters';
+                if (value?.isEmpty ?? true) {
+                  return 'Please create a password';
+                }
+                if (value!.length < 6) {
+                  return 'Password must be at least 6 characters';
+                }
                 return null;
               },
             ),
@@ -1291,7 +1595,8 @@ class _RegisterScreenState extends State<RegisterScreen>
               decoration: InputDecoration(
                 labelText: 'Confirm Password *',
                 hintText: 'Confirm your password',
-                prefixIcon: const Icon(Icons.lock_outline, color: Colors.white70),
+                prefixIcon:
+                const Icon(Icons.lock_outline, color: Colors.white70),
                 labelStyle: const TextStyle(color: Colors.white70),
                 hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
                 suffixIcon: IconButton(
@@ -1301,12 +1606,13 @@ class _RegisterScreenState extends State<RegisterScreen>
                         : Icons.visibility_off_outlined,
                     color: Colors.white70,
                   ),
-                  onPressed: () => setState(
-                          () => _obscureConfirmPassword = !_obscureConfirmPassword),
+                  onPressed: () => setState(() =>
+                  _obscureConfirmPassword = !_obscureConfirmPassword),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+                  borderSide:
+                  BorderSide(color: Colors.white.withOpacity(0.3)),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -1317,12 +1623,72 @@ class _RegisterScreenState extends State<RegisterScreen>
               ),
               obscureText: _obscureConfirmPassword,
               validator: (value) {
-                if (value?.isEmpty ?? true) return 'Please confirm your password';
-                if (value != _passwordController.text) return 'Passwords do not match';
+                if (value?.isEmpty ?? true) {
+                  return 'Please confirm your password';
+                }
+                if (value != _passwordController.text) {
+                  return 'Passwords do not match';
+                }
                 return null;
               },
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 20),
+            // ✅ Consent: Privacy Policy + Terms (required)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: Checkbox(
+                    value: _acceptedLegal,
+                    onChanged: (v) => setState(() => _acceptedLegal = v ?? false),
+                    activeColor: const Color(0xFF49e8c3),
+                    checkColor: Colors.black,
+                    side: const BorderSide(color: Colors.white70),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Text('I agree to the ',
+                            style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        GestureDetector(
+                          onTap: () => context.push('/legal/privacy'),
+                          child: const Text('Privacy Policy',
+                              style: TextStyle(
+                                  color: Color(0xFF49e8c3),
+                                  fontSize: 13,
+                                  decoration: TextDecoration.underline)),
+                        ),
+                        const Text(' and ',
+                            style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        GestureDetector(
+                          onTap: () => context.push('/legal/terms'),
+                          child: const Text('Terms of Service',
+                              style: TextStyle(
+                                  color: Color(0xFF49e8c3),
+                                  fontSize: 13,
+                                  decoration: TextDecoration.underline)),
+                        ),
+                        if (_isProvider)
+                          const Text(
+                              '. I consent to my CNIC and face photos being stored for identity verification.',
+                              style: TextStyle(color: Colors.white70, fontSize: 13))
+                        else
+                          const Text('.',
+                              style: TextStyle(color: Colors.white70, fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
             LoadingButton(
               onPressed: _completeRegistration,
               isLoading: _isLoading,
@@ -1339,11 +1705,14 @@ class _RegisterScreenState extends State<RegisterScreen>
                     _progressValue = 0.5;
                   });
                 } else {
-                  context.pop();
+                  setState(() {
+                    _currentRegisterStep = RegisterStep.emailVerification;
+                    _progressValue = 0.05;
+                  });
                 }
               },
               child: Text(
-                _isProvider ? 'Back' : 'Back to Login',
+                _isProvider ? 'Back' : 'Back',
                 style: const TextStyle(color: Colors.white70),
               ),
             ),
@@ -1443,10 +1812,8 @@ class _RegisterScreenState extends State<RegisterScreen>
           child: ElevatedButton(
             onPressed: () {
               if (_isProvider) {
-                // ✅ Both 'provider' and 'business' go to business setup
                 context.go('/business/type');
               } else {
-                // ✅ 'user' goes to user home
                 context.go('/user/home');
               }
             },
@@ -1474,8 +1841,13 @@ class _RegisterScreenState extends State<RegisterScreen>
   // PROGRESS BAR
   // ============================================================
   Widget _buildProgressBar() {
-    final steps = _isProvider ? ['CNIC', 'Face', 'Info', 'Done'] : ['Info', 'Done'];
-    final values = _isProvider ? [0.0, 0.25, 0.5, 0.75, 1.0] : [0.0, 0.5, 1.0];
+    final steps = _isProvider
+        ? ['Email', 'CNIC', 'Face', 'Info', 'Done']
+        : ['Email', 'Info', 'Done'];
+
+    final values = _isProvider
+        ? [0.0, 0.2, 0.45, 0.7, 1.0, 1.0]
+        : [0.0, 0.5, 1.0, 1.0];
 
     return Column(
       children: [
@@ -1486,19 +1858,22 @@ class _RegisterScreenState extends State<RegisterScreen>
             return Column(
               children: [
                 Container(
-                  width: 32,
-                  height: 32,
+                  width: 30,
+                  height: 30,
                   decoration: BoxDecoration(
-                    color: isActive ? Colors.white : Colors.white.withOpacity(0.2),
+                    color:
+                    isActive ? Colors.white : Colors.white.withOpacity(0.2),
                     shape: BoxShape.circle,
                   ),
                   child: Center(
                     child: Text(
                       '${index + 1}',
                       style: TextStyle(
-                        color: isActive ? const Color(0xFF38804f) : Colors.white54,
+                        color: isActive
+                            ? const Color(0xFF38804f)
+                            : Colors.white54,
                         fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                        fontSize: 11,
                       ),
                     ),
                   ),
@@ -1508,8 +1883,9 @@ class _RegisterScreenState extends State<RegisterScreen>
                   steps[index],
                   style: TextStyle(
                     color: isActive ? Colors.white : Colors.white54,
-                    fontSize: 10,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                    fontSize: 9,
+                    fontWeight:
+                    isActive ? FontWeight.w600 : FontWeight.normal,
                   ),
                 ),
               ],
@@ -1551,7 +1927,8 @@ class _RegisterScreenState extends State<RegisterScreen>
                 ),
                 GestureDetector(
                   onTap: () => setState(() => _errorMessage = null),
-                  child: const Icon(Icons.close, color: Colors.red, size: 18),
+                  child:
+                  const Icon(Icons.close, color: Colors.red, size: 18),
                 ),
               ],
             ),
@@ -1565,6 +1942,8 @@ class _RegisterScreenState extends State<RegisterScreen>
 
   Widget _buildStepContent() {
     switch (_currentRegisterStep) {
+      case RegisterStep.emailVerification:
+        return _buildEmailVerification();
       case RegisterStep.cnicUpload:
         return _buildCnicUpload();
       case RegisterStep.cnicVerification:
@@ -1583,7 +1962,6 @@ class _RegisterScreenState extends State<RegisterScreen>
     return Scaffold(
       body: Stack(
         children: [
-          // Background with animations
           LayoutBuilder(
             builder: (context, constraints) {
               return _buildBackground(Size(
@@ -1592,7 +1970,6 @@ class _RegisterScreenState extends State<RegisterScreen>
               ));
             },
           ),
-          // Content on top of background
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),

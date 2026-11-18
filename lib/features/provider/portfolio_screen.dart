@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/theme.dart';
 import '../../core/services/supabase_service.dart';
+import '../../core/services/global_error_handler.dart'; // ✅ Added
 import '../provider/auth_provider.dart';
 
 class ProviderPortfolioScreen extends StatefulWidget {
@@ -146,119 +147,36 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
                 );
               },
             ),
-            AnimatedBuilder(
-              animation: _floatingController,
-              builder: (context, child) {
-                final value = math.sin(
-                  _floatingController.value * math.pi * 2,
-                );
-                return Positioned(
-                  bottom: 50 + value * 15,
-                  left: 30,
-                  child: Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.04),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.06),
-                        width: 1.5,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-            AnimatedBuilder(
-              animation: _floatingController,
-              builder: (context, child) {
-                final value = math.cos(
-                  _floatingController.value * math.pi * 2 + 1.5,
-                );
-                return Positioned(
-                  bottom: 120 + value * 12,
-                  left: 20,
-                  child: Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.08),
-                    ),
-                  ),
-                );
-              },
-            ),
-            Positioned(
-              top: 80,
-              right: 20,
-              child: _buildDotPattern(
-                rows: 4,
-                columns: 4,
-                spacing: 18,
-              ),
-            ),
-            Positioned(
-              bottom: 100,
-              right: 16,
-              child: _buildDotPattern(
-                rows: 4,
-                columns: 4,
-                spacing: 18,
-              ),
-            ),
-            Positioned(
-              bottom: 100,
-              left: 16,
-              child: _buildDotPattern(
-                rows: 4,
-                columns: 4,
-                spacing: 18,
-              ),
-            ),
+            Positioned(top: 80, right: 20, child: _buildDotPattern(rows: 4, columns: 4, spacing: 18)),
+            Positioned(bottom: 100, right: 16, child: _buildDotPattern(rows: 4, columns: 4, spacing: 18)),
+            Positioned(bottom: 100, left: 16, child: _buildDotPattern(rows: 4, columns: 4, spacing: 18)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildDotPattern({
-    required int rows,
-    required int columns,
-    required double spacing,
-  }) {
+  Widget _buildDotPattern({required int rows, required int columns, required double spacing}) {
     return SizedBox(
       width: columns * spacing,
       height: rows * spacing,
       child: Column(
-        children: List.generate(
-          rows,
-              (row) {
-            return Row(
-              children: List.generate(
-                columns,
-                    (column) {
-                  final isEven = (row + column) % 2 == 0;
-                  return Container(
-                    width: isEven ? 4 : 2.5,
-                    height: isEven ? 4 : 2.5,
-                    margin: EdgeInsets.only(
-                      right: spacing - 4,
-                      bottom: spacing - 4,
-                    ),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(
-                        isEven ? 0.35 : 0.055,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            );
-          },
-        ),
+        children: List.generate(rows, (row) {
+          return Row(
+            children: List.generate(columns, (column) {
+              final isEven = (row + column) % 2 == 0;
+              return Container(
+                width: isEven ? 4 : 2.5,
+                height: isEven ? 4 : 2.5,
+                margin: EdgeInsets.only(right: spacing - 4, bottom: spacing - 4),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(isEven ? 0.35 : 0.055),
+                ),
+              );
+            }),
+          );
+        }),
       ),
     );
   }
@@ -429,9 +347,7 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
 
   void _showAddDialog() {
     if (_selectedImage == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select an image first')),
-      );
+      GlobalErrorHandler.showCustomError('Please select an image first');
       return;
     }
 
@@ -441,15 +357,29 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            backgroundColor: Colors.white,
+            backgroundColor: const Color(0xFF1d3b27),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
-            title: const Row(
+            title: Row(
               children: [
-                Icon(Icons.image_rounded, color: Color(0xFF49e8c3)),
-                SizedBox(width: 10),
-                Text('Add Portfolio Image'),
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF49e8c3).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.image_rounded, color: Color(0xFF49e8c3), size: 18), // ✅ Smaller icon
+                ),
+                const SizedBox(width: 10),
+                const Expanded( // ✅ Wrapped in Expanded to prevent overflow
+                  child: Text(
+                    'Add Portfolio Image',
+                    style: TextStyle(color: Colors.white, fontSize: 16), // ✅ Adjusted font size
+                    maxLines: 2, // ✅ Allow wrapping
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
             content: SingleChildScrollView(
@@ -462,7 +392,7 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
                       width: double.infinity,
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(12),
-                        color: Colors.grey.shade100,
+                        color: Colors.white.withOpacity(0.05),
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(12),
@@ -477,16 +407,26 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
                   TextField(
                     controller: _titleController,
                     enabled: !_isUploading,
-                    decoration: const InputDecoration(
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
                       labelText: 'Title *',
+                      labelStyle: const TextStyle(color: Colors.white70),
                       hintText: 'Enter work title',
-                      prefixIcon: Icon(Icons.title_rounded, color: Color(0xFF49e8c3)),
+                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                      prefixIcon: const Icon(Icons.title_rounded, color: Color(0xFF49e8c3)),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.1),
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.white.withOpacity(0.2)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.white.withOpacity(0.2)),
                       ),
                       focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(12)),
-                        borderSide: BorderSide(color: Color(0xFF49e8c3)),
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF49e8c3)),
                       ),
                     ),
                   ),
@@ -494,16 +434,26 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
                   TextField(
                     controller: _descriptionController,
                     enabled: !_isUploading,
-                    decoration: const InputDecoration(
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
                       labelText: 'Description',
+                      labelStyle: const TextStyle(color: Colors.white70),
                       hintText: 'Describe your work',
-                      prefixIcon: Icon(Icons.description_rounded, color: Color(0xFF49e8c3)),
+                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                      prefixIcon: const Icon(Icons.description_rounded, color: Color(0xFF49e8c3)),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.1),
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(12)),
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.white.withOpacity(0.2)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.white.withOpacity(0.2)),
                       ),
                       focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(12)),
-                        borderSide: BorderSide(color: Color(0xFF49e8c3)),
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF49e8c3)),
                       ),
                     ),
                     maxLines: 3,
@@ -521,7 +471,7 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
                     _descriptionController.clear();
                   });
                 },
-                child: const Text('Cancel'),
+                child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
               ),
               ElevatedButton(
                 onPressed: _isUploading ? null : () async {
@@ -553,21 +503,13 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
 
   Future<void> _addPortfolioItem() async {
     if (_titleController.text.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please enter a title')),
-        );
-      }
+      GlobalErrorHandler.showCustomError('Please enter a title');
       setState(() => _isUploading = false);
       return;
     }
 
     if (_selectedImage == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please select an image')),
-        );
-      }
+      GlobalErrorHandler.showCustomError('Please select an image');
       setState(() => _isUploading = false);
       return;
     }
@@ -604,16 +546,7 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
           _descriptionController.clear();
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('✅ Portfolio image added successfully!'),
-            backgroundColor: const Color(0xFF49e8c3),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        );
+        GlobalErrorHandler.showCustomSuccess('Portfolio image added successfully!');
       }
     } catch (e) {
       debugPrint('❌ Error adding portfolio item: $e');
@@ -621,16 +554,7 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
         setState(() {
           _isUploading = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red.shade400,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        );
+        GlobalErrorHandler.showCustomError('Failed to add image. Please try again.');
       }
     }
   }
@@ -639,16 +563,16 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFF1d3b27),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
-        title: const Text('Delete Image'),
-        content: const Text('Are you sure you want to delete this image?'),
+        title: const Text('Delete Image', style: TextStyle(color: Colors.white)),
+        content: const Text('Are you sure you want to delete this image?', style: TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -674,32 +598,165 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
           setState(() {
             _portfolio = imagesOnly;
           });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Image deleted'),
-              backgroundColor: const Color(0xFF49e8c3),
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          );
+          GlobalErrorHandler.showCustomSuccess('Image deleted');
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: Colors.red.shade400,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          );
+          GlobalErrorHandler.showCustomError('Failed to delete image. Please try again.');
         }
       }
     }
+  }
+
+  // ============================================================
+  // FULL-SCREEN IMAGE PREVIEWER
+  // ============================================================
+  void _showImageDetails(int initialIndex) {
+    PageController pageController = PageController(initialPage: initialIndex);
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.95),
+      builder: (context) {
+        return Scaffold(
+          backgroundColor: Colors.transparent,
+          body: Stack(
+            children: [
+              // Swipeable Image Viewer
+              PageView.builder(
+                controller: pageController,
+                itemCount: _portfolio.length,
+                itemBuilder: (context, index) {
+                  final item = _portfolio[index];
+                  final mediaUrl = item['media_url'] ?? '';
+
+                  return InteractiveViewer(
+                    minScale: 0.5,
+                    maxScale: 4.0,
+                    child: Center(
+                      child: CachedNetworkImage(
+                        imageUrl: mediaUrl,
+                        fit: BoxFit.contain,
+                        width: double.infinity,
+                        height: double.infinity,
+                        placeholder: (context, url) => const Center(
+                          child: CircularProgressIndicator(color: Color(0xFF49e8c3)),
+                        ),
+                        errorWidget: (context, url, error) => const Icon(
+                          Icons.broken_image,
+                          size: 80,
+                          color: Colors.white24,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+
+              // Top Bar (Close button)
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 10,
+                right: 20,
+                child: GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.5),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.close_rounded, color: Colors.white, size: 24),
+                  ),
+                ),
+              ),
+
+              // Bottom Info Overlay
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(24, 40, 24, 30),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withOpacity(0.9),
+                      ],
+                    ),
+                  ),
+                  child: AnimatedBuilder(
+                    animation: pageController,
+                    builder: (context, child) {
+                      int currentIndex = pageController.hasClients
+                          ? pageController.page?.round() ?? initialIndex
+                          : initialIndex;
+                      if (currentIndex >= _portfolio.length) currentIndex = _portfolio.length - 1;
+
+                      final currentItem = _portfolio[currentIndex];
+                      final title = currentItem['title'] ?? 'Untitled';
+                      final description = currentItem['description'] ?? '';
+
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          if (description.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              description,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.white.withOpacity(0.8),
+                                height: 1.5,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 16),
+                          // Delete Button (only for current image)
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.pop(context);
+                              _deletePortfolioItem(currentItem['id']);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.red.withOpacity(0.4)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                                  SizedBox(width: 8),
+                                  Text('Delete Image', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -739,8 +796,8 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
                         ),
                       ),
                       const SizedBox(width: 12),
-                      Expanded(
-                        child: const Text(
+                      const Expanded(
+                        child: Text(
                           'My Portfolio',
                           style: TextStyle(
                             fontSize: 20,
@@ -926,20 +983,19 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
         itemCount: _portfolio.length,
         itemBuilder: (context, index) {
           final item = _portfolio[index];
-          return _buildPortfolioCard(item);
+          return _buildPortfolioCard(item, index);
         },
       ),
     );
   }
 
-  Widget _buildPortfolioCard(Map<String, dynamic> item) {
+  Widget _buildPortfolioCard(Map<String, dynamic> item, int index) {
     final mediaUrl = item['media_url'] ?? '';
     final title = item['title'] ?? 'Untitled';
     final description = item['description'] ?? '';
 
     return GestureDetector(
-      onTap: () => _showImageDetails(item),
-      onLongPress: () => _deletePortfolioItem(item['id']),
+      onTap: () => _showImageDetails(index),
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.06),
@@ -1011,128 +1067,6 @@ class _ProviderPortfolioScreenState extends State<ProviderPortfolioScreen>
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  void _showImageDetails(Map<String, dynamic> item) {
-    final title = item['title'] ?? 'Untitled';
-    final description = item['description'] ?? '';
-    final mediaUrl = item['media_url'] ?? '';
-
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(16),
-        child: Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF38804f),
-                Color(0xFF1d3b27),
-                Color(0xFF1d3b27),
-                Color(0xFF38804f),
-              ],
-              stops: [0.0, 0.35, 0.70, 1.0],
-            ),
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.3),
-                blurRadius: 30,
-                offset: const Offset(0, 15),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Image
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
-                child: CachedNetworkImage(
-                  imageUrl: mediaUrl,
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: 280,
-                  placeholder: (context, url) => Container(
-                    height: 280,
-                    color: Colors.white.withOpacity(0.05),
-                    child: const Center(
-                      child: CircularProgressIndicator(
-                        color: Color(0xFF49e8c3),
-                      ),
-                    ),
-                  ),
-                  errorWidget: (context, url, error) => Container(
-                    height: 280,
-                    color: Colors.white.withOpacity(0.05),
-                    child: Icon(
-                      Icons.broken_image,
-                      size: 60,
-                      color: Colors.white.withOpacity(0.2),
-                    ),
-                  ),
-                ),
-              ),
-              // Info
-              Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    if (description.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        description,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.white.withOpacity(0.7),
-                          height: 1.5,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.pop(context),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF49e8c3),
-                          foregroundColor: Colors.black,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text(
-                          'Close',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );

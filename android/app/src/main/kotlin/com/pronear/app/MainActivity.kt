@@ -1,4 +1,4 @@
-package com.example.near_pro1
+package com.pronear.app
 
 import io.flutter.embedding.android.FlutterActivity
 

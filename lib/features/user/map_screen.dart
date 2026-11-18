@@ -396,7 +396,7 @@ class _MapScreenState extends State<MapScreen>
         _loadProviders();
       }
     }).onError((error) {
-      print('Location stream error: $error');
+      debugPrint('Location stream error: $error');
     });
   }
 

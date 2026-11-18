@@ -1,3 +1,4 @@
+// lib/features/user/chat_screen.dart
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -9,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../app/theme.dart';
 import '../../core/services/supabase_service.dart';
+import '../../core/services/global_error_handler.dart';
 import '../provider/auth_provider.dart';
 import '../provider/chat_provider.dart';
 
@@ -39,7 +41,6 @@ class _UserChatScreenState extends State<UserChatScreen>
   String? _providerProfileImage;
   bool _isProviderOnline = false;
 
-  // Background Animation Controllers
   late AnimationController _pulseController;
   late AnimationController _floatingController;
 
@@ -51,7 +52,6 @@ class _UserChatScreenState extends State<UserChatScreen>
     _initializeChat();
     _loadProviderInfo();
 
-    // Background Animations
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 3000),
@@ -89,31 +89,24 @@ class _UserChatScreenState extends State<UserChatScreen>
   Future<void> _initializeChat() async {
     try {
       final authProvider = context.read<AuthProvider>();
-
       if (authProvider.userId == null) {
         setState(() => _isLoading = false);
         return;
       }
-
       await _chatProvider.loadMessages(widget.roomId);
       _messageCount = _chatProvider.messages.length;
       _chatProvider.subscribeToMessages(widget.roomId);
       await _chatProvider.markAsRead(widget.roomId, authProvider.userId!);
-
-      setState(() {
-        _isLoading = false;
-      });
-
+      setState(() => _isLoading = false);
       _scrollToBottom();
     } catch (e) {
-      print('Error initializing chat: $e');
+      debugPrint('Error initializing chat: $e');
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _loadProviderInfo() async {
     if (widget.providerId == null) return;
-
     try {
       final provider = await SupabaseService().getProvider(widget.providerId!);
       if (provider != null && mounted) {
@@ -144,18 +137,14 @@ class _UserChatScreenState extends State<UserChatScreen>
     if (text.isEmpty) return;
 
     final authProvider = context.read<AuthProvider>();
-
     if (authProvider.userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please login to send messages')),
-      );
+      GlobalErrorHandler.showCustomError('Please login to send messages');
       return;
     }
 
     try {
       final senderId = authProvider.userId!;
       _messageController.clear();
-
       await _chatProvider.sendMessage(
         roomId: widget.roomId,
         senderId: senderId,
@@ -163,30 +152,30 @@ class _UserChatScreenState extends State<UserChatScreen>
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to send message: $e'),
-            backgroundColor: Colors.red.shade400,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        );
+        GlobalErrorHandler.showCustomError('Failed to send message.');
       }
     }
   }
 
   Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    final image = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
-
-    if (image == null || !mounted) return;
-
     try {
+      final picker = ImagePicker();
+      final image = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70,
+        maxWidth: 1024,
+      );
+      if (image == null || !mounted) return;
+
+      final authProvider = context.read<AuthProvider>();
+      if (authProvider.userId == null) {
+        GlobalErrorHandler.showCustomError('Please login.');
+        return;
+      }
+
       final bytes = await image.readAsBytes();
-      final fileName = 'chat_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final filePath = 'public/$fileName';
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final filePath = '${authProvider.userId}/chat_$timestamp.jpg';
 
       await Supabase.instance.client.storage
           .from('chat_images')
@@ -203,9 +192,6 @@ class _UserChatScreenState extends State<UserChatScreen>
           .from('chat_images')
           .getPublicUrl(filePath);
 
-      final authProvider = context.read<AuthProvider>();
-      if (authProvider.userId == null) return;
-
       await _chatProvider.sendMessage(
         roomId: widget.roomId,
         senderId: authProvider.userId!,
@@ -214,23 +200,74 @@ class _UserChatScreenState extends State<UserChatScreen>
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to upload image: $e'),
-            backgroundColor: Colors.red.shade400,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        );
+        GlobalErrorHandler.showCustomError('Failed to upload image.');
       }
     }
   }
 
-  // ============================================================
-  // BACKGROUND
-  // ============================================================
+  Future<void> _showMessageOptions(Map<String, dynamic> message) async {
+    final authProvider = context.read<AuthProvider>();
+    final isMine = message['sender_id'] == authProvider.userId;
+    final messageId = message['id'] as String;
+    final isDeleted = message['is_deleted'] == true;
+
+    if (isDeleted) {
+      GlobalErrorHandler.showCustomError('This message was deleted');
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF1d3b27),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline_rounded, color: Colors.orange),
+                title: const Text('Delete for me', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _chatProvider.deleteForMe(messageId);
+                  GlobalErrorHandler.showCustomSuccess('Message hidden from your chat.');
+                },
+              ),
+              if (isMine)
+                ListTile(
+                  leading: const Icon(Icons.delete_forever_rounded, color: Colors.red),
+                  title: const Text('Delete for everyone', style: TextStyle(color: Colors.red)),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    try {
+                      await _chatProvider.deleteForEveryone(messageId);
+                      GlobalErrorHandler.showCustomSuccess('Message deleted for everyone.');
+                    } catch (e) {
+                      GlobalErrorHandler.showCustomError('Failed to delete message.');
+                    }
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildBackground(Size size) {
     return Positioned.fill(
       child: IgnorePointer(
@@ -257,9 +294,11 @@ class _UserChatScreenState extends State<UserChatScreen>
               child: AnimatedBuilder(
                 animation: _pulseController,
                 builder: (context, child) {
-                  final opacity = 0.15 + (0.08 * (1 + math.sin(
-                    _pulseController.value * math.pi * 2,
-                  )) / 2);
+                  final opacity = 0.15 +
+                      (0.08 *
+                          (1 +
+                              math.sin(_pulseController.value * math.pi * 2)) /
+                          2);
                   return Container(
                     width: 350,
                     height: 350,
@@ -296,9 +335,7 @@ class _UserChatScreenState extends State<UserChatScreen>
             AnimatedBuilder(
               animation: _floatingController,
               builder: (context, child) {
-                final value = math.sin(
-                  _floatingController.value * math.pi * 2,
-                );
+                final value = math.sin(_floatingController.value * math.pi * 2);
                 return Positioned(
                   top: 140 + value * 15,
                   right: 30,
@@ -317,239 +354,12 @@ class _UserChatScreenState extends State<UserChatScreen>
                 );
               },
             ),
-            AnimatedBuilder(
-              animation: _floatingController,
-              builder: (context, child) {
-                final value = math.sin(
-                  _floatingController.value * math.pi * 2,
-                );
-                return Positioned(
-                  bottom: 50 + value * 15,
-                  left: 30,
-                  child: Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.04),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.06),
-                        width: 1.5,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-            AnimatedBuilder(
-              animation: _floatingController,
-              builder: (context, child) {
-                final value = math.cos(
-                  _floatingController.value * math.pi * 2 + 1.5,
-                );
-                return Positioned(
-                  bottom: 120 + value * 12,
-                  left: 20,
-                  child: Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.08),
-                    ),
-                  ),
-                );
-              },
-            ),
-            Positioned(
-              top: 80,
-              right: 20,
-              child: _buildDotPattern(
-                rows: 4,
-                columns: 4,
-                spacing: 18,
-              ),
-            ),
-            Positioned(
-              bottom: 100,
-              right: 16,
-              child: _buildDotPattern(
-                rows: 4,
-                columns: 4,
-                spacing: 18,
-              ),
-            ),
-            Positioned(
-              bottom: 100,
-              left: 16,
-              child: _buildDotPattern(
-                rows: 4,
-                columns: 4,
-                spacing: 18,
-              ),
-            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildDotPattern({
-    required int rows,
-    required int columns,
-    required double spacing,
-  }) {
-    return SizedBox(
-      width: columns * spacing,
-      height: rows * spacing,
-      child: Column(
-        children: List.generate(
-          rows,
-              (row) {
-            return Row(
-              children: List.generate(
-                columns,
-                    (column) {
-                  final isEven = (row + column) % 2 == 0;
-                  return Container(
-                    width: isEven ? 4 : 2.5,
-                    height: isEven ? 4 : 2.5,
-                    margin: EdgeInsets.only(
-                      right: spacing - 4,
-                      bottom: spacing - 4,
-                    ),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(
-                        isEven ? 0.35 : 0.055,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // BUILD METHODS
-  // ============================================================
-
-  Widget _buildGlassCard({required Widget child}) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.08),
-          width: 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: child,
-    );
-  }
-
-  Widget _buildErrorWidget(String error) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline_rounded, size: 64, color: Colors.red.shade400),
-            const SizedBox(height: 16),
-            const Text(
-              'Error loading messages',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              error,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.white.withOpacity(0.6),
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _initializeChat,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF49e8c3),
-                foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 100,
-            height: 100,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: Colors.white.withOpacity(0.05),
-                width: 1,
-              ),
-            ),
-            child: Icon(
-              Icons.chat_bubble_outline_rounded,
-              size: 50,
-              color: Colors.white.withOpacity(0.3),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'No messages yet',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.white.withOpacity(0.8),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Start chatting with the provider',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.white.withOpacity(0.4),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================================
-  // BUILD
-  // ============================================================
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -567,24 +377,18 @@ class _UserChatScreenState extends State<UserChatScreen>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.lock_outline_rounded, size: 64, color: Colors.white.withOpacity(0.3)),
+                  Icon(Icons.lock_outline_rounded,
+                      size: 64, color: Colors.white.withOpacity(0.3)),
                   const SizedBox(height: 16),
-                  Text(
-                    'Please login to chat',
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Colors.white.withOpacity(0.7),
-                    ),
-                  ),
+                  Text('Please login to chat',
+                      style: TextStyle(
+                          fontSize: 18, color: Colors.white.withOpacity(0.7))),
                   const SizedBox(height: 16),
                   ElevatedButton(
                     onPressed: () => context.go('/login'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF49e8c3),
                       foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
                     ),
                     child: const Text('Login'),
                   ),
@@ -604,164 +408,36 @@ class _UserChatScreenState extends State<UserChatScreen>
           SafeArea(
             child: Column(
               children: [
-                // ============================================================
-                // CUSTOM APP BAR
-                // ============================================================
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Row(
-                    children: [
-                      GestureDetector(
-                        onTap: () => context.pop(),
-                        child: Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.06),
-                              width: 1,
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.arrow_back_rounded,
-                            color: Colors.white.withOpacity(0.8),
-                            size: 22,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: _isProviderOnline
-                                ? const Color(0xFF49e8c3)
-                                : Colors.grey,
-                            width: 2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _isProviderOnline
-                                  ? const Color(0xFF49e8c3).withOpacity(0.3)
-                                  : Colors.black.withOpacity(0.1),
-                              blurRadius: 10,
-                            ),
-                          ],
-                        ),
-                        child: ClipOval(
-                          child: _providerProfileImage != null
-                              ? CachedNetworkImage(
-                            imageUrl: _providerProfileImage!,
-                            fit: BoxFit.cover,
-                            width: 40,
-                            height: 40,
-                            errorWidget: (context, url, error) => Container(
-                              color: const Color(0xFF49e8c3),
-                              child: Icon(
-                                Icons.person,
-                                color: Colors.white,
-                                size: 20,
-                              ),
-                            ),
-                          )
-                              : Container(
-                            color: const Color(0xFF49e8c3),
-                            child: Icon(
-                              Icons.person,
-                              color: Colors.white,
-                              size: 20,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              widget.providerName ?? 'Provider',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Row(
-                              children: [
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: _isProviderOnline
-                                        ? const Color(0xFF49e8c3)
-                                        : Colors.grey.shade500,
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  _isProviderOnline ? 'Online' : 'Offline',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: _isProviderOnline
-                                        ? const Color(0xFF49e8c3)
-                                        : Colors.white.withOpacity(0.3),
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // ============================================================
-                // MESSAGES LIST
-                // ============================================================
+                _buildAppBar(),
                 Expanded(
                   child: _isLoading
                       ? const Center(
                     child: CircularProgressIndicator(
-                      color: Color(0xFF49e8c3),
-                    ),
+                        color: Color(0xFF49e8c3)),
                   )
                       : chatProvider.error != null
-                      ? _buildErrorWidget(chatProvider.error!)
+                      ? Center(
+                      child: Text(chatProvider.error!,
+                          style: const TextStyle(color: Colors.white)))
                       : messages.isEmpty
                       ? _buildEmptyState()
                       : ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
+                        horizontal: 16, vertical: 8),
                     itemCount: messages.length,
                     itemBuilder: (context, index) {
                       final message = messages[index];
-                      final isMine = message['sender_id'] == authProvider.userId;
+                      final isMine =
+                          message['sender_id'] == authProvider.userId;
                       final sender = message['users'] ?? {};
-
-                      return _buildMessage(
-                        message,
-                        isMine,
-                        sender,
+                      return GestureDetector(
+                        onLongPress: () => _showMessageOptions(message),
+                        child: _buildMessage(message, isMine, sender),
                       );
                     },
                   ),
                 ),
-
-                // ============================================================
-                // MESSAGE INPUT
-                // ============================================================
                 _buildMessageInput(),
               ],
             ),
@@ -771,35 +447,134 @@ class _UserChatScreenState extends State<UserChatScreen>
     );
   }
 
+  Widget _buildAppBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: () => context.pop(),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withOpacity(0.06)),
+              ),
+              child: Icon(Icons.arrow_back_rounded,
+                  color: Colors.white.withOpacity(0.8), size: 22),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                  color: _isProviderOnline ? const Color(0xFF49e8c3) : Colors.grey,
+                  width: 2),
+            ),
+            child: ClipOval(
+              child: _providerProfileImage != null
+                  ? CachedNetworkImage(
+                imageUrl: _providerProfileImage!,
+                fit: BoxFit.cover,
+                width: 40,
+                height: 40,
+                errorWidget: (_, __, ___) => Container(
+                  color: const Color(0xFF49e8c3),
+                  child: const Icon(Icons.person, color: Colors.white, size: 20),
+                ),
+              )
+                  : Container(
+                color: const Color(0xFF49e8c3),
+                child: const Icon(Icons.person, color: Colors.white, size: 20),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.providerName ?? 'Provider',
+                  style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Row(
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _isProviderOnline
+                            ? const Color(0xFF49e8c3)
+                            : Colors.grey.shade500,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _isProviderOnline ? 'Online' : 'Offline',
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: _isProviderOnline
+                              ? const Color(0xFF49e8c3)
+                              : Colors.white.withOpacity(0.3)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.chat_bubble_outline_rounded,
+              size: 80, color: Colors.white.withOpacity(0.2)),
+          const SizedBox(height: 20),
+          Text('No messages yet',
+              style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white.withOpacity(0.8))),
+          const SizedBox(height: 8),
+          Text('Start chatting with the provider',
+              style: TextStyle(
+                  fontSize: 14, color: Colors.white.withOpacity(0.4))),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMessageInput() {
     final isSending = context.watch<ChatProvider>().isSending;
-
     return Container(
       padding: const EdgeInsets.all(12),
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.08),
-          width: 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       child: Row(
         children: [
           IconButton(
-            icon: Icon(
-              Icons.attach_file_rounded,
-              color: const Color(0xFF49e8c3),
-              size: 24,
-            ),
+            icon: const Icon(Icons.attach_file_rounded,
+                color: Color(0xFF49e8c3), size: 24),
             onPressed: isSending ? null : _pickImage,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -808,31 +583,13 @@ class _UserChatScreenState extends State<UserChatScreen>
           Expanded(
             child: TextField(
               controller: _messageController,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-              ),
+              style: const TextStyle(color: Colors.white, fontSize: 15),
               decoration: InputDecoration(
                 hintText: 'Type a message...',
-                hintStyle: TextStyle(
-                  color: Colors.white.withOpacity(0.3),
-                  fontSize: 14,
-                ),
+                hintStyle:
+                TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 14),
                 border: InputBorder.none,
                 contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                suffixIcon: isSending
-                    ? const Padding(
-                  padding: EdgeInsets.all(8.0),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Color(0xFF49e8c3),
-                    ),
-                  ),
-                )
-                    : null,
               ),
               onSubmitted: (_) => _sendMessage(),
             ),
@@ -841,22 +598,18 @@ class _UserChatScreenState extends State<UserChatScreen>
           Container(
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF49e8c3), Color(0xFF31b999)],
-              ),
+                  colors: [Color(0xFF49e8c3), Color(0xFF31b999)]),
               shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF49e8c3).withOpacity(0.3),
-                  blurRadius: 10,
-                ),
-              ],
             ),
             child: IconButton(
-              icon: const Icon(
-                Icons.send_rounded,
-                color: Colors.black,
-                size: 20,
-              ),
+              icon: isSending
+                  ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.black))
+                  : const Icon(Icons.send_rounded,
+                  color: Colors.black, size: 20),
               onPressed: isSending ? null : _sendMessage,
               padding: const EdgeInsets.all(10),
               constraints: const BoxConstraints(),
@@ -873,6 +626,7 @@ class _UserChatScreenState extends State<UserChatScreen>
       Map<String, dynamic> sender,
       ) {
     final isImage = message['message_type'] == 'image';
+    final isDeleted = message['is_deleted'] == true;
     final isRead = message['is_read'] ?? false;
     final time = message['created_at'] != null
         ? DateFormat('hh:mm a').format(DateTime.parse(message['created_at']))
@@ -881,7 +635,8 @@ class _UserChatScreenState extends State<UserChatScreen>
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
-        mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment:
+        isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isMine) ...[
@@ -897,11 +652,14 @@ class _UserChatScreenState extends State<UserChatScreen>
               ),
               child: CircleAvatar(
                 radius: 16,
-                backgroundImage: sender['profile_image'] != null && sender['profile_image'].isNotEmpty
+                backgroundImage: sender['profile_image'] != null &&
+                    sender['profile_image'].isNotEmpty
                     ? CachedNetworkImageProvider(sender['profile_image'])
                     : null,
-                child: sender['profile_image'] == null || sender['profile_image'].isEmpty
-                    ? Icon(Icons.person, size: 16, color: Colors.white.withOpacity(0.5))
+                child: sender['profile_image'] == null ||
+                    sender['profile_image'].isEmpty
+                    ? Icon(Icons.person,
+                    size: 16, color: Colors.white.withOpacity(0.5))
                     : null,
               ),
             ),
@@ -913,19 +671,20 @@ class _UserChatScreenState extends State<UserChatScreen>
               decoration: BoxDecoration(
                 gradient: isMine
                     ? const LinearGradient(
-                  colors: [Color(0xFF49e8c3), Color(0xFF31b999)],
-                )
-                    : LinearGradient(
-                  colors: [
-                    Colors.white.withOpacity(0.08),
-                    Colors.white.withOpacity(0.04),
-                  ],
-                ),
+                    colors: [Color(0xFF49e8c3), Color(0xFF31b999)])
+                    : LinearGradient(colors: [
+                  Colors.white.withOpacity(0.08),
+                  Colors.white.withOpacity(0.04),
+                ]),
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(16),
                   topRight: const Radius.circular(16),
-                  bottomLeft: isMine ? const Radius.circular(16) : const Radius.circular(4),
-                  bottomRight: isMine ? const Radius.circular(4) : const Radius.circular(16),
+                  bottomLeft: isMine
+                      ? const Radius.circular(16)
+                      : const Radius.circular(4),
+                  bottomRight: isMine
+                      ? const Radius.circular(4)
+                      : const Radius.circular(16),
                 ),
                 border: Border.all(
                   color: isMine
@@ -933,15 +692,6 @@ class _UserChatScreenState extends State<UserChatScreen>
                       : Colors.white.withOpacity(0.06),
                   width: 1,
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: isMine
-                        ? const Color(0xFF49e8c3).withOpacity(0.2)
-                        : Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -949,15 +699,25 @@ class _UserChatScreenState extends State<UserChatScreen>
                   if (!isMine && sender['full_name'] != null)
                     Text(
                       sender['full_name'],
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: const Color(0xFF49e8c3),
-                      ),
+                      style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF49e8c3)),
                     ),
                   if (!isMine && sender['full_name'] != null)
                     const SizedBox(height: 4),
-                  if (isImage)
+                  if (isDeleted)
+                    Text(
+                      'This message was deleted',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontStyle: FontStyle.italic,
+                        color: isMine
+                            ? Colors.black.withOpacity(0.5)
+                            : Colors.white.withOpacity(0.4),
+                      ),
+                    )
+                  else if (isImage)
                     ClipRRect(
                       borderRadius: BorderRadius.circular(10),
                       child: CachedNetworkImage(
@@ -965,25 +725,20 @@ class _UserChatScreenState extends State<UserChatScreen>
                         height: 150,
                         width: 200,
                         fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(
+                        placeholder: (_, __) => Container(
                           height: 150,
                           width: 200,
                           color: Colors.white.withOpacity(0.05),
                           child: const Center(
-                            child: CircularProgressIndicator(
-                              color: Color(0xFF49e8c3),
-                            ),
-                          ),
+                              child: CircularProgressIndicator(
+                                  color: Color(0xFF49e8c3))),
                         ),
-                        errorWidget: (context, url, error) => Container(
+                        errorWidget: (_, __, ___) => Container(
                           height: 150,
                           width: 200,
                           color: Colors.white.withOpacity(0.05),
-                          child: Icon(
-                            Icons.broken_image,
-                            color: Colors.white.withOpacity(0.2),
-                            size: 40,
-                          ),
+                          child: Icon(Icons.broken_image,
+                              color: Colors.white.withOpacity(0.2), size: 40),
                         ),
                       ),
                     )
@@ -991,10 +746,11 @@ class _UserChatScreenState extends State<UserChatScreen>
                     Text(
                       message['content'] ?? '',
                       style: TextStyle(
-                        fontSize: 14,
-                        height: 1.4,
-                        color: isMine ? Colors.black : Colors.white.withOpacity(0.9),
-                      ),
+                          fontSize: 14,
+                          height: 1.4,
+                          color: isMine
+                              ? Colors.black
+                              : Colors.white.withOpacity(0.9)),
                     ),
                   const SizedBox(height: 4),
                   Row(
@@ -1003,19 +759,18 @@ class _UserChatScreenState extends State<UserChatScreen>
                       Text(
                         time,
                         style: TextStyle(
-                          fontSize: 10,
-                          color: isMine
-                              ? Colors.black.withOpacity(0.5)
-                              : Colors.white.withOpacity(0.3),
-                        ),
+                            fontSize: 10,
+                            color: isMine
+                                ? Colors.black.withOpacity(0.5)
+                                : Colors.white.withOpacity(0.3)),
                       ),
                       if (isMine) ...[
                         const SizedBox(width: 4),
                         Icon(
-                          isRead ? Icons.done_all : Icons.done_all,
+                          isRead ? Icons.done_all : Icons.done,
                           size: 14,
                           color: isRead
-                              ? const Color(0xFF49e8c3)
+                              ? Colors.black.withOpacity(0.7)
                               : Colors.black.withOpacity(0.4),
                         ),
                       ],

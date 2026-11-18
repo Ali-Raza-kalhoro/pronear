@@ -40,10 +40,10 @@ class AuthProvider extends ChangeNotifier {
       final response = await _service.signIn(email, password);
       if (response.user != null) {
         String? role = response.user!.userMetadata?['role'] as String?;
-        print('🔍 Auth - Role from metadata: $role');
+        debugPrint('🔍 Auth - Role from metadata: $role');
 
         final dbRole = await _service.getUserRole(response.user!.id);
-        print('🔍 Auth - Role from DB: $dbRole');
+        debugPrint('🔍 Auth - Role from DB: $dbRole');
 
         if (dbRole != null) {
           role = dbRole;
@@ -57,7 +57,7 @@ class AuthProvider extends ChangeNotifier {
 
         // Final role assignment
         _userRole = role ?? 'user';
-        print('✅ Identified final role: $_userRole');
+        debugPrint('✅ Identified final role: $_userRole');
 
         // Load verification status
         await _loadVerificationStatus();
@@ -79,11 +79,11 @@ class AuthProvider extends ChangeNotifier {
               'updated_at': DateTime.now().toIso8601String(),
             });
           } catch (e) {
-            print('⚠️ Auth - Could not create/update profile: $e');
+            debugPrint('⚠️ Auth - Could not create/update profile: $e');
           }
         }
 
-        print('✅ User logged in: ${_user?['full_name'] ?? email}');
+        debugPrint('✅ User logged in: ${_user?['full_name'] ?? email}');
         _isLoading = false;
         notifyListeners();
         return true;
@@ -135,8 +135,8 @@ class AuthProvider extends ChangeNotifier {
         // Load verification status
         await _loadVerificationStatus();
 
-        print('✅ User registered: ${_user?['full_name']}');
-        print('✅ User role: $_userRole');
+        debugPrint('✅ User registered: ${_user?['full_name']}');
+        debugPrint('✅ User role: $_userRole');
         _isLoading = false;
         notifyListeners();
         return true;
@@ -232,12 +232,12 @@ class AuthProvider extends ChangeNotifier {
         _isCnicVerified = profile['cnic_verified'] ?? false;
         _isFaceVerified = profile['face_verified'] ?? false;
 
-        print('📋 CNIC: $_cnicNumber');
-        print('✅ CNIC Verified: $_isCnicVerified');
-        print('✅ Face Verified: $_isFaceVerified');
+        debugPrint('📋 CNIC: $_cnicNumber');
+        debugPrint('✅ CNIC Verified: $_isCnicVerified');
+        debugPrint('✅ Face Verified: $_isFaceVerified');
       }
     } catch (e) {
-      print('❌ Error loading verification status: $e');
+      debugPrint('❌ Error loading verification status: $e');
     }
   }
 
@@ -287,7 +287,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       return await _service.checkCNICExists(cnicNumber);
     } catch (e) {
-      print('❌ Error checking CNIC: $e');
+      debugPrint('❌ Error checking CNIC: $e');
       return false;
     }
   }
@@ -303,7 +303,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       return await _service.uploadVerificationImage(userId, type, imageFile);
     } catch (e) {
-      print('❌ Error uploading verification image: $e');
+      debugPrint('❌ Error uploading verification image: $e');
       rethrow;
     }
   }
@@ -330,11 +330,11 @@ class AuthProvider extends ChangeNotifier {
       // 1. Try metadata first
       final currentUser = Supabase.instance.client.auth.currentUser;
       String? role = currentUser?.userMetadata?['role'] as String?;
-      print('🔍 LoadProfile - Role from metadata: $role');
+      debugPrint('🔍 LoadProfile - Role from metadata: $role');
 
       // 2. Try database
       final dbRole = await _service.getUserRole(userId);
-      print('🔍 LoadProfile - Role from DB: $dbRole');
+      debugPrint('🔍 LoadProfile - Role from DB: $dbRole');
       if (dbRole != null) role = dbRole;
 
       // 3. Load full profile
@@ -352,8 +352,8 @@ class AuthProvider extends ChangeNotifier {
       // 4. Load verification status
       await _loadVerificationStatus();
 
-      print('✅ Profile loaded for: ${_user?['full_name'] ?? currentUser?.email}');
-      print('✅ Final user role: $_userRole');
+      debugPrint('✅ Profile loaded for: ${_user?['full_name'] ?? currentUser?.email}');
+      debugPrint('✅ Final user role: $_userRole');
       notifyListeners();
     }
   }

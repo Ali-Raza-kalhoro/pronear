@@ -56,6 +56,7 @@ class SupabaseService {
     }
   }
 
+
 // ============================================================
 // BUSINESS METHODS
 // ============================================================
@@ -167,102 +168,72 @@ class SupabaseService {
 // Delete portfolio item
   Future<void> deletePortfolioItem(String itemId) async {
     try {
+      // 1. Get the item to find the media_url
+      final item = await _client
+          .from('provider_portfolio')
+          .select('media_url')
+          .eq('id', itemId)
+          .maybeSingle();
+
+      if (item != null && item['media_url'] != null) {
+        final String mediaUrl = item['media_url'];
+
+        // 2. Extract the file path from the URL
+        // Example URL: https://[project].supabase.co/storage/v1/object/public/portfolio_media/portfolio/123_image.jpg
+        // We need: portfolio/123_image.jpg
+        final uri = Uri.parse(mediaUrl);
+        final pathSegments = uri.pathSegments;
+
+        // Find the index of 'portfolio_media' and take everything after it
+        final int bucketIndex = pathSegments.indexOf('portfolio_media');
+
+        if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
+          final String filePath = pathSegments.sublist(bucketIndex + 1).join('/');
+
+          // 3. Delete the file from Storage
+          try {
+            await _client.storage
+                .from('portfolio_media')
+                .remove([filePath]);
+            debugPrint('✅ Deleted file from storage: $filePath');
+          } catch (storageError) {
+            debugPrint('⚠️ Failed to delete from storage (continuing): $storageError');
+            // We continue even if storage deletion fails to ensure DB record is removed
+          }
+        }
+      }
+
+      // 4. Delete the database record
       await _client
           .from('provider_portfolio')
           .delete()
           .eq('id', itemId);
-      debugPrint('✅ Portfolio item deleted');
+
+      debugPrint('✅ Portfolio item deleted from database');
     } catch (e) {
       debugPrint('❌ Error deleting portfolio item: $e');
       throw Exception('Failed to delete portfolio item: $e');
     }
-// Add these to your SupabaseService
-
-// Get provider portfolio
-    Future<List<Map<String, dynamic>>> getProviderPortfolio(String providerId) async {
-      try {
-        final response = await _client
-            .from('provider_portfolio')
-            .select()
-            .eq('provider_id', providerId)
-            .order('created_at', ascending: false);
-
-        return List<Map<String, dynamic>>.from(response);
-      } catch (e) {
-        debugPrint('❌ Error getting portfolio: $e');
-        return [];
-      }
+  }
+  Future<void> deleteMessageForEveryone(String messageId) async {
+    try {
+      await _client.rpc('delete_message_for_everyone', params: {
+        'msg_id': messageId,
+      });
+      debugPrint('✅ Message soft-deleted for everyone');
+    } catch (e) {
+      debugPrint('❌ Error deleting message: $e');
+      throw Exception('Failed to delete message: $e');
     }
-
-// Add portfolio item
-    Future<void> addPortfolioItem(Map<String, dynamic> data) async {
-      try {
-        data['created_at'] = DateTime.now().toIso8601String();
-        data['updated_at'] = DateTime.now().toIso8601String();
-        await _client.from('provider_portfolio').insert(data);
-        debugPrint('✅ Portfolio item added');
-      } catch (e) {
-        debugPrint('❌ Error adding portfolio item: $e');
-        throw Exception('Failed to add portfolio item: $e');
-      }
-    }
-
-// Delete portfolio item
-    Future<void> deletePortfolioItem(String itemId) async {
-      try {
-        await _client
-            .from('provider_portfolio')
-            .delete()
-            .eq('id', itemId);
-        debugPrint('✅ Portfolio item deleted');
-      } catch (e) {
-        debugPrint('❌ Error deleting portfolio item: $e');
-        throw Exception('Failed to delete portfolio item: $e');
-      }
-    }
-
-// Upload portfolio media
-    Future<String> uploadPortfolioMedia(String providerId, File file, String type) async {
-      try {
-        final timestamp = DateTime.now().millisecondsSinceEpoch;
-        final extension = type == 'video' ? 'mp4' : 'jpg';
-        final fileName = '${providerId}_${timestamp}.$extension';
-        final filePath = 'portfolio/$fileName';
-
-        await _client.storage
-            .from('portfolio_media')
-            .upload(
-          filePath,
-          file,
-          fileOptions: FileOptions(
-            contentType: type == 'video' ? 'video/mp4' : 'image/jpeg',
-          ),
-        );
-
-        return _client.storage
-            .from('portfolio_media')
-            .getPublicUrl(filePath);
-      } catch (e) {
-        debugPrint('❌ Error uploading portfolio media: $e');
-        throw Exception('Failed to upload media: $e');
-      }
-    }
-
-// Stream portfolio changes
-    Stream<List<Map<String, dynamic>>> listenToPortfolio(String providerId) {
-      return _client
-          .from('provider_portfolio')
-          .stream(primaryKey: ['id'])
-          .eq('provider_id', providerId)
-          .order('created_at', ascending: false);
-    }  }
-
+  }
 // Upload portfolio media
   Future<String> uploadPortfolioMedia(String providerId, File file, String type) async {
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final extension = type == 'video' ? 'mp4' : 'jpg';
-      final fileName = 'portfolio/${providerId}_${timestamp}.$extension';
+      // ✅ owner folder = auth uid so storage RLS can restrict writes
+      final ownerId = _client.auth.currentUser!.id;
+      final fileName = '$ownerId/portfolio/${providerId}_$timestamp.$extension';
 
       await _client.storage
           .from('portfolio_media')
@@ -494,7 +465,7 @@ class SupabaseService {
     String? searchQuery,
   }) async {
     try {
-      print('📍 getNearbyProviders called with lat: $latitude, lng: $longitude');
+      debugPrint('📍 getNearbyProviders called with lat: $latitude, lng: $longitude');
 
       // ✅ Use LEFT JOIN instead of INNER JOIN so providers without services still appear
       var query = _client.from('providers').select('''
@@ -513,7 +484,7 @@ class SupabaseService {
       }
 
       final response = await query;
-      print('📦 Raw response count: ${response.length}');
+      debugPrint('📦 Raw response count: ${response.length}');
 
       // Deduplicate providers
       final uniqueProvidersMap = <String, Map<String, dynamic>>{};
@@ -531,7 +502,7 @@ class SupabaseService {
         }
       }
       var filteredProviders = uniqueProvidersMap.values.toList();
-      print('📦 After deduplication: ${filteredProviders.length}');
+      debugPrint('📦 After deduplication: ${filteredProviders.length}');
 
       // Apply search query filter
       if (searchQuery != null && searchQuery.isNotEmpty) {
@@ -544,7 +515,7 @@ class SupabaseService {
               name.contains(searchLower) ||
               businessName.contains(searchLower);
         }).toList();
-        print('📦 After search filter: ${filteredProviders.length}');
+        debugPrint('📦 After search filter: ${filteredProviders.length}');
       }
 
       // Calculate distance for each provider
@@ -576,7 +547,7 @@ class SupabaseService {
           .where((p) => p['distance'] >= 0 && p['distance'] <= radiusInKm)
           .toList();
 
-      print('📦 After radius filter: ${providersInRange.length}');
+      debugPrint('📦 After radius filter: ${providersInRange.length}');
 
       // Sort by distance
       providersInRange.sort((a, b) => (a['distance'] as double).compareTo(b['distance'] as double));
@@ -591,7 +562,7 @@ class SupabaseService {
   // Add this method to SupabaseService
   Future<List<Map<String, dynamic>>> getAllProviders() async {
     try {
-      print('📊 Fetching all providers...');
+      debugPrint('📊 Fetching all providers...');
 
       final response = await _client.from('providers').select('''
         *,
@@ -599,7 +570,7 @@ class SupabaseService {
         provider_services!left(*)
       ''').eq('is_available', true);
 
-      print('📊 Found ${response.length} providers');
+      debugPrint('📊 Found ${response.length} providers');
 
       // Deduplicate providers
       final uniqueProvidersMap = <String, Map<String, dynamic>>{};
@@ -618,7 +589,7 @@ class SupabaseService {
 
       return uniqueProvidersMap.values.toList();
     } catch (e) {
-      print('❌ Error fetching providers: $e');
+      debugPrint('❌ Error fetching providers: $e');
       return [];
     }
   }
@@ -690,7 +661,7 @@ class SupabaseService {
       }
       return response ?? {};
     } catch (e) {
-      print('❌ Error creating business request: $e');
+      debugPrint('❌ Error creating business request: $e');
       rethrow;
     }
   }
@@ -780,7 +751,7 @@ class SupabaseService {
       }
       return response ?? {};
     } catch (e) {
-      print('❌ Error creating service request: $e');
+      debugPrint('❌ Error creating service request: $e');
       rethrow;
     }
   }  Future<void> updateServiceRequest(String requestId, Map<String, dynamic> data) async {
@@ -980,9 +951,12 @@ class SupabaseService {
         .from('notifications')
         .stream(primaryKey: ['id'])
         .eq('user_id', userId)
-        .order('created_at', ascending: false);
+        .order('created_at', ascending: false)
+        .handleError((error) {
+      // ✅ Silently catch socket/DNS errors so the app doesn't crash
+      debugPrint('⚠️ Notification stream offline: $error');
+    });
   }
-
   // ============ CHAT METHODS ============
 
   Future<List<Map<String, dynamic>>> getMessages(String roomId) async {
@@ -1044,22 +1018,17 @@ class SupabaseService {
 
 // lib/core/services/supabase_service.dart
 
-// Check if CNIC already exists and get user details
+// Check if CNIC already exists.
+// ✅ Uses a SECURITY DEFINER RPC so the app never needs read access to other
+// users' rows. Returns only a masked email + role (e.g. "mo***@gmail.com").
   Future<Map<String, dynamic>?> getUserByCNIC(String cnicNumber) async {
     try {
-      final response = await _client
-          .from('users')
-          .select('id, email, full_name, phone, role, cnic, cnic_verified, face_verified')
-          .eq('cnic', cnicNumber)
-          .maybeSingle();
-
-      if (response != null) {
-        debugPrint('✅ User found with CNIC: $cnicNumber');
-        return response;
-      }
-
-      debugPrint('ℹ️ No user found with CNIC: $cnicNumber');
-      return null;
+      final response = await _client.rpc(
+        'cnic_registration_info',
+        params: {'p_cnic': cnicNumber},
+      );
+      if (response == null) return null;
+      return Map<String, dynamic>.from(response as Map);
     } catch (e) {
       debugPrint('❌ Error checking CNIC: $e');
       return null;
@@ -1068,15 +1037,16 @@ class SupabaseService {
 
 // Check if CNIC already exists (returns bool)
   Future<bool> checkCNICExists(String cnicNumber) async {
-    try {
-      final user = await getUserByCNIC(cnicNumber);
-      return user != null;
-    } catch (e) {
-      debugPrint('❌ Error checking CNIC: $e');
-      return false;
-    }
+    final user = await getUserByCNIC(cnicNumber);
+    return user != null;
   }
-// Save user with verification data
+
+// Save provider verification data.
+// ✅ Sensitive data (CNIC number, image paths, face data) goes to the PRIVATE
+// table `user_verifications` (owner-only RLS), NOT to `users`, because `users`
+// must stay readable by other people (names in chat, provider lists).
+// Status starts as 'pending'; an admin approves it (see FIX_GUIDE.md).
+// The app never marks itself verified.
   Future<void> saveUserWithVerification({
     required String userId,
     required String cnicNumber,
@@ -1086,27 +1056,42 @@ class SupabaseService {
     required String faceEmbedding,
   }) async {
     try {
-      await _client.from('users').update({
+      await _client.from('user_verifications').upsert({
+        'user_id': userId,
         'cnic': cnicNumber,
-        'cnic_front_image': cnicFrontImage,
-        'cnic_back_image': cnicBackImage,
-        'face_image': faceImage,
+        'cnic_front_path': cnicFrontImage,
+        'cnic_back_path': cnicBackImage,
+        'face_path': faceImage,
         'face_embedding': faceEmbedding,
-        'cnic_verified': true,
-        'face_verified': true,
+        'status': 'pending',
         'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', userId);
-
-      debugPrint('✅ User verification data saved');
+      });
+      debugPrint('✅ Verification data saved (pending admin review)');
     } catch (e) {
       debugPrint('❌ Error saving verification data: $e');
-      throw Exception('Failed to save verification data: $e');
+      rethrow;
     }
   }
 
+  /// Own verification row (status + storage paths), or null.
+  Future<Map<String, dynamic>?> getMyVerification() async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) return null;
+    try {
+      return await _client
+          .from('user_verifications')
+          .select()
+          .eq('user_id', uid)
+          .maybeSingle();
+    } catch (e) {
+      debugPrint('⚠️ Could not load verification row: $e');
+      return null;
+    }
+  }
 
-
-// Upload verification image to storage
+// Upload verification image to the PRIVATE bucket.
+// ✅ Path starts with the user's id so storage RLS can restrict access to the
+// owner. Returns the storage path – use createSignedUrl() to view it.
   Future<String> uploadVerificationImage(
       String userId,
       String type,
@@ -1114,8 +1099,7 @@ class SupabaseService {
       ) async {
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final fileName = '${userId}_${type}_$timestamp.jpg';
-      final filePath = 'verification/$fileName';
+      final filePath = '$userId/${type}_$timestamp.jpg';
 
       await _client.storage
           .from('verification_images')
@@ -1127,19 +1111,24 @@ class SupabaseService {
         ),
       );
 
-      final publicUrl = _client.storage
-          .from('verification_images')
-          .getPublicUrl(filePath);
-
-      return publicUrl;
+      return filePath;
     } catch (e) {
-      print('❌ Error uploading verification image: $e');
+      debugPrint('❌ Error uploading verification image: $e');
       throw Exception('Failed to upload image: $e');
     }
   }
 
-
-
+  /// Short-lived link for a private verification image (owner / admin only).
+  Future<String?> getVerificationImageUrl(String path, {int expiresInSeconds = 600}) async {
+    try {
+      return await _client.storage
+          .from('verification_images')
+          .createSignedUrl(path, expiresInSeconds);
+    } catch (e) {
+      debugPrint('❌ Error creating signed URL: $e');
+      return null;
+    }
+  }
 
   Future<void> sendMessage(String roomId, String senderId, String content,
       {String? type, String? mediaUrl}) async {
@@ -1332,7 +1321,7 @@ class SupabaseService {
       }
       return response ?? {};
     } catch (e) {
-      print('❌ Error creating business request: $e');
+      debugPrint('❌ Error creating business request: $e');
       rethrow;
     }
   }

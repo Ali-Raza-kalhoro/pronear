@@ -805,6 +805,53 @@ class _ProviderRequestsScreenState extends State<ProviderRequestsScreen>
               ],
             ),
           ],
+
+          // ✅ Accepted job → provider can mark it completed (enables customer rating)
+          if (status == 'accepted') ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Mark job as completed?'),
+                      content: const Text(
+                          'The customer will be asked to rate your service.'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel'),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Completed'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (ok == true) {
+                    _handleRequest(request['id'], 'completed');
+                  }
+                },
+                icon: const Icon(Icons.task_alt_rounded, size: 18),
+                label: const Text(
+                  'Mark Completed',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green.shade400,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

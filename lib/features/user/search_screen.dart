@@ -166,11 +166,11 @@ class _SearchScreenState extends State<SearchScreen>
         _hasLocationPermission = true;
       });
       if (kDebugMode) {
-        print('✅ Location obtained: $_latitude, $_longitude');
+        debugPrint('✅ Location obtained: $_latitude, $_longitude');
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Location error: $e');
+        debugPrint('❌ Location error: $e');
       }
       setState(() {
         _hasLocationPermission = false;
@@ -193,11 +193,11 @@ class _SearchScreenState extends State<SearchScreen>
       final categories = await SupabaseService().getCategories();
       setState(() => _categories = categories);
       if (kDebugMode) {
-        print('✅ Loaded ${categories.length} categories');
+        debugPrint('✅ Loaded ${categories.length} categories');
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Error loading categories: $e');
+        debugPrint('❌ Error loading categories: $e');
       }
     }
   }
@@ -284,7 +284,7 @@ class _SearchScreenState extends State<SearchScreen>
     }
 
     if (kDebugMode) {
-      print('🔍 Searching for: "$query"');
+      debugPrint('🔍 Searching for: "$query"');
     }
 
     setState(() {
@@ -374,7 +374,7 @@ class _SearchScreenState extends State<SearchScreen>
       }
 
       if (kDebugMode) {
-        print('📊 Found ${results.length} providers');
+        debugPrint('📊 Found ${results.length} providers');
       }
 
       setState(() {
@@ -383,7 +383,7 @@ class _SearchScreenState extends State<SearchScreen>
       });
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Search error: $e');
+        debugPrint('❌ Search error: $e');
       }
       setState(() {
         _isLoading = false;

@@ -231,7 +231,7 @@ class _SplashScreenState extends State<SplashScreen>
         if (user == null) {
           // ❌ User not found in database - this shouldn't happen for real users
           // Sign out and go to role selection
-          print('⚠️ User not found in database, signing out...');
+          debugPrint('⚠️ User not found in database, signing out...');
           await authProvider.logout();
           if (mounted) {
             context.go('/role-selection');
@@ -243,11 +243,12 @@ class _SplashScreenState extends State<SplashScreen>
         String? role = user['role'] as String?;
 
         // If role is 'business', treat as 'provider'
+        final isUnfinishedBusiness = role == 'business';
         if (role == 'business') {
           role = 'provider';
         }
 
-        print('🔍 SplashScreen - User role: $role');
+        debugPrint('🔍 SplashScreen - User role: $role');
 
         // ✅ Navigate based on role
         if (role == 'provider') {
@@ -256,6 +257,8 @@ class _SplashScreenState extends State<SplashScreen>
 
           if (hasCV) {
             context.go('/provider/dashboard');
+          } else if (isUnfinishedBusiness) {
+            context.go('/business/type');
           } else {
             context.go('/provider/cv');
           }
@@ -264,7 +267,7 @@ class _SplashScreenState extends State<SplashScreen>
           context.go('/user/home');
         }
       } catch (e) {
-        print('❌ Error during auth check: $e');
+        debugPrint('❌ Error during auth check: $e');
         // On error, go to role selection
         if (mounted) {
           context.go('/role-selection');
@@ -272,7 +275,7 @@ class _SplashScreenState extends State<SplashScreen>
       }
     } else {
       // ❌ No session - go to role selection
-      print('🔍 No session found - navigating to role selection');
+      debugPrint('🔍 No session found - navigating to role selection');
       if (mounted) {
         context.go('/role-selection');
       }

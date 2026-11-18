@@ -1,3 +1,4 @@
+// lib/features/user/notification_screen.dart
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -74,7 +75,6 @@ class _NotificationsScreenState extends State<NotificationsScreen>
       } catch (e) {
         if (mounted) {
           setState(() => _isLoading = false);
-          // ❌ Removed error snackbar
         }
       }
     }
@@ -101,7 +101,6 @@ class _NotificationsScreenState extends State<NotificationsScreen>
             // Only show if not read, not already shown, and not in shown set
             if (!isRead && !_shownNotificationIds.contains(id)) {
               _shownNotificationIds.add(id);
-              // ✅ Show device notification only (no snackbar)
               _showDeviceNotification(notification);
             }
           }
@@ -114,11 +113,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
   // ✅ Only show device notification, NO snackbar
   void _showDeviceNotification(Map<String, dynamic> notification) {
-    // ❌ No snackbar notification
-    // ❌ Removed ScaffoldMessenger.showSnackBar completely
-
     // Device notification is handled in main.dart
-    // The _showNotification method in main.dart handles the device notification
   }
 
   Future<void> _markAsRead(String id) async {
@@ -133,7 +128,6 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         });
       }
     } catch (e) {
-      // ❌ Removed error snackbar
       debugPrint('Error marking notification as read: $e');
     }
   }
@@ -149,10 +143,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               notification['is_read'] = true;
             }
           });
-          // ❌ Removed success snackbar
         }
       } catch (e) {
-        // ❌ Removed error snackbar
         debugPrint('Error marking all notifications as read: $e');
       }
     }
@@ -167,40 +159,40 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         });
       }
     } catch (e) {
-      // ❌ Removed error snackbar
       debugPrint('Error deleting notification: $e');
     }
   }
 
   void _handleNotificationTap(Map<String, dynamic> notification) async {
-    // Mark as read if unread
     if (notification['is_read'] == false) {
       await _markAsRead(notification['id']);
     }
 
-    // Navigate based on type
     final type = notification['type'] ?? 'system';
-    final data = notification['data'] as Map<String, dynamic>?;
+    final data = notification['data'] is Map
+        ? Map<String, dynamic>.from(notification['data'] as Map)
+        : null;
+    if (!mounted) return;
+
+    // ✅ This screen is shared by customers and providers – route by role.
+    final role = context.read<AuthProvider>().userRole;
+    final isProvider = role == 'provider' || role == 'business';
 
     switch (type) {
       case 'message':
-        if (data != null && data.containsKey('chat_id')) {
-          context.push('/user/chats/${data['chat_id']}');
+        final roomId = data?['room_id'] ?? data?['chat_id'];
+        if (roomId != null) {
+          context.push(isProvider ? '/provider/chat/$roomId' : '/user/chat/$roomId');
         } else {
-          context.push('/user/chats');
+          context.push(isProvider ? '/provider/chats' : '/user/chats');
         }
         break;
       case 'service_request':
-        if (data != null && data.containsKey('request_id')) {
-          context.push('/user/requests/${data['request_id']}');
-        } else {
-          context.push('/user/requests');
-        }
+        context.push(isProvider ? '/provider/requests' : '/user/requests');
         break;
+      case 'request_status':
       case 'status':
-        if (data != null && data.containsKey('request_id')) {
-          context.push('/user/requests/${data['request_id']}');
-        }
+        context.push(isProvider ? '/provider/requests' : '/user/requests');
         break;
       case 'review':
         if (data != null && data.containsKey('provider_id')) {
@@ -213,7 +205,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
   }
 
   // ============================================================
-  // BACKGROUND
+  // BACKGROUND (Green Theme)
   // ============================================================
   Widget _buildBackground(Size size) {
     return Positioned.fill(
@@ -226,10 +218,10 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Color(0xFF1A1040),
-                    Color(0xFF2D1B69),
-                    Color(0xFF1A0B2E),
-                    Color(0xFF0F0A2A),
+                    Color(0xFF38804f),
+                    Color(0xFF1d3b27),
+                    Color(0xFF1d3b27),
+                    Color(0xFF38804f),
                   ],
                   stops: [0.0, 0.35, 0.70, 1.0],
                 ),
@@ -381,14 +373,11 @@ class _NotificationsScreenState extends State<NotificationsScreen>
           SafeArea(
             child: Column(
               children: [
-                // ============================================================
-                // CUSTOM APP BAR
-                // ============================================================
+                // Custom App Bar
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: Row(
                     children: [
-                      // Back Button
                       GestureDetector(
                         onTap: () => context.pop(),
                         child: Container(
@@ -425,9 +414,9 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                             if (unreadCount > 0)
                               Text(
                                 '$unreadCount unread',
-                                style: TextStyle(
+                                style: const TextStyle(
                                   fontSize: 12,
-                                  color: const Color(0xFF49e8c3),
+                                  color: Color(0xFF49e8c3),
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -455,14 +444,14 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                 ),
                               ],
                             ),
-                            child: Row(
+                            child: const Row(
                               children: [
-                                const Icon(
+                                Icon(
                                   Icons.done_all,
                                   color: Colors.black,
                                   size: 16,
                                 ),
-                                const SizedBox(width: 4),
+                                SizedBox(width: 4),
                                 Text(
                                   'Read All',
                                   style: TextStyle(
@@ -481,9 +470,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
 
                 const SizedBox(height: 8),
 
-                // ============================================================
-                // NOTIFICATIONS LIST
-                // ============================================================
+                // Notifications List
                 Expanded(
                   child: _isLoading
                       ? const Center(
@@ -648,7 +635,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                                     ),
                                                     borderRadius: BorderRadius.circular(12),
                                                   ),
-                                                  child: Text(
+                                                  child: const Text(
                                                     'NEW',
                                                     style: TextStyle(
                                                       fontSize: 9,

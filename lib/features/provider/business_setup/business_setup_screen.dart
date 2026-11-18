@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/theme.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/services/global_error_handler.dart'; // ✅ Added for permissions
 import '../../provider/auth_provider.dart';
 
 class BusinessSetupScreen extends StatefulWidget {
@@ -122,16 +123,15 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
       setState(() {
         _isLoadingLocation = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not get location: $e'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      GlobalErrorHandler.showCustomError('Could not get location. Please check permissions.');
     }
   }
 
   Future<void> _pickProfileImage() async {
+    // ✅ Check Gallery Permission
+    final hasPermission = await GlobalErrorHandler.requestGallery(context);
+    if (!hasPermission) return;
+
     try {
       final XFile? image = await _picker.pickImage(
         source: ImageSource.gallery,
@@ -143,7 +143,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
 
       final bytes = await image.readAsBytes();
       final fileName = 'business_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final filePath = 'business/$fileName';
+      final filePath = '${Supabase.instance.client.auth.currentUser!.id}/business/$fileName'; // ✅ owner folder
 
       await Supabase.instance.client.storage
           .from('profiles')
@@ -162,14 +162,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
         _isLoading = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Business image uploaded successfully')),
-      );
+      GlobalErrorHandler.showCustomSuccess('Business image uploaded successfully');
     } catch (e) {
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Upload failed: ${e.toString()}')),
-      );
+      GlobalErrorHandler.showCustomError('Upload failed. Please try again.');
     }
   }
 
@@ -177,9 +173,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     if (_latitude == null || _longitude == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please wait for location to load')),
-      );
+      GlobalErrorHandler.showCustomError('Please wait for location to load');
       return;
     }
 
@@ -196,14 +190,12 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
         throw Exception('User not logged in');
       }
 
-      // ✅ Check if user exists in users table
       final existingUser = await Supabase.instance.client
           .from('users')
           .select()
           .eq('id', userId)
           .maybeSingle();
 
-      // Parse service radius
       final String radiusText = _radiusController.text.trim();
       double serviceRadius = 20.0;
       if (radiusText.isNotEmpty) {
@@ -214,7 +206,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
       }
 
       if (existingUser == null) {
-        // ✅ Create user with ALL required fields
         final authUser = await Supabase.instance.client.auth.getUser();
         final email = authUser.user?.email ?? '';
         final userMetadata = authUser.user?.userMetadata;
@@ -241,7 +232,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
           'updated_at': DateTime.now().toIso8601String(),
         });
       } else {
-        // ✅ Update existing user
         await Supabase.instance.client
             .from('users')
             .update({
@@ -255,7 +245,6 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
         }).eq('id', userId);
       }
 
-      // ✅ Check if provider exists
       final existingProvider = await SupabaseService().getProviderByUserId(userId);
 
       final Map<String, dynamic> providerData = {
@@ -287,17 +276,13 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Business setup completed!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        GlobalErrorHandler.showCustomSuccess('Business setup completed!');
         context.go('/business/category-selection');
       }
     } catch (e) {
-      print('❌ Error: $e');
-      setState(() => _errorMessage = e.toString());
+      if (mounted) {
+        setState(() => _errorMessage = e.toString());
+      }
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -319,10 +304,10 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                   colors: [
-                    Color(0xFF1A1040),
-                    Color(0xFF2D1B69),
-                    Color(0xFF1A0B2E),
-                    Color(0xFF0F0A2A),
+                    Color(0xFF38804f),
+                    Color(0xFF1d3b27),
+                    Color(0xFF1d3b27),
+                    Color(0xFF38804f),
                   ],
                   stops: [0.0, 0.35, 0.70, 1.0],
                 ),
@@ -754,17 +739,20 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
     );
   }
 
+  // ============================================================
+  // PROFILE HEADER (Updated to match green theme)
+  // ============================================================
   Widget _buildProfileHeader() {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF6C63FF), Color(0xFF4A43C4)],
+          colors: [Color(0xFF49e8c3), Color(0xFF38804f)], // ✅ Green gradient
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6C63FF).withOpacity(0.3),
+            color: const Color(0xFF49e8c3).withOpacity(0.3), // ✅ Green shadow
             blurRadius: 20,
             offset: const Offset(0, 10),
           ),
@@ -805,7 +793,7 @@ class _BusinessSetupScreenState extends State<BusinessSetupScreen>
                   child: IconButton(
                     icon: const Icon(
                       Icons.camera_alt,
-                      color: Color(0xFF6C63FF),
+                      color: Color(0xFF38804f), // ✅ Green camera icon
                       size: 18,
                     ),
                     onPressed: _pickProfileImage,

@@ -1,3 +1,4 @@
+import '../legal/legal_screen.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -180,6 +181,8 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen>
                               // BOTTOM
                               _buildBottomSection(),
 
+                              const SizedBox(height: 8),
+                              const LegalLinksRow(),
                               const SizedBox(height: 20),
                             ],
                           ),

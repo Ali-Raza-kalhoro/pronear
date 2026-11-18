@@ -165,7 +165,7 @@ class _UserHomeScreenState extends State<UserHomeScreen>
       await _loadNearbyProviders();
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Error loading data: $e');
+        debugPrint('❌ Error loading data: $e');
       }
       setState(() => _isLoading = false);
     }
@@ -194,7 +194,7 @@ class _UserHomeScreenState extends State<UserHomeScreen>
       });
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Location error: $e');
+        debugPrint('❌ Location error: $e');
       }
       setState(() {
         _isLocationLoading = false;
@@ -224,7 +224,7 @@ class _UserHomeScreenState extends State<UserHomeScreen>
       });
     } catch (e) {
       if (kDebugMode) {
-        print('❌ Error loading providers: $e');
+        debugPrint('❌ Error loading providers: $e');
       }
       final providerProvider = context.read<ProviderProvider>();
       providerProvider.setError(e.toString());
@@ -680,7 +680,7 @@ class _UserHomeScreenState extends State<UserHomeScreen>
                       ),
 
                       _buildDrawerTeamMember(
-                        name: 'Ali Raza',
+                        name: 'Ali Raza Kalhoro',
                         role: 'Full Stack Developer',
                         rollNo: '2K23/CSM/17',
                         color: const Color(0xFF49e8c3),
@@ -1341,7 +1341,7 @@ class _UserHomeScreenState extends State<UserHomeScreen>
       ),
       child: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.transparent,
+        backgroundColor: Color(0xFF1d3b27),
         selectedItemColor: const Color(0xFF49e8c3),
         unselectedItemColor: Colors.white.withOpacity(0.4),
         selectedLabelStyle: const TextStyle(

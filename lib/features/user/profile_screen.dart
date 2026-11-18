@@ -1,3 +1,4 @@
+// lib/features/user/profile_screen.dart
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +8,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../app/theme.dart';
 import '../../widgets/loading_button.dart';
+import '../../core/services/global_error_handler.dart';
+import '../../core/services/supabase_service.dart';
 import '../provider/auth_provider.dart';
 
 class UserProfileScreen extends StatefulWidget {
@@ -21,6 +24,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   bool _isLoading = false;
+  bool _isDeleting = false;
   bool _isEditing = false;
   String? _profileImageUrl;
 
@@ -33,7 +37,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     super.initState();
     _loadUserData();
 
-    // Background Animations
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 3000),
@@ -297,16 +300,20 @@ class _UserProfileScreenState extends State<UserProfileScreen>
   }
 
   Future<void> _pickProfileImage() async {
+    final hasPermission = await GlobalErrorHandler.requestGallery(context);
+    if (!hasPermission) return;
+
     final picker = ImagePicker();
     final image = await picker.pickImage(source: ImageSource.gallery);
 
     if (image != null) {
+      setState(() => _isLoading = true);
       try {
         final bytes = await image.readAsBytes();
         final fileName = 'profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final filePath = 'public/$fileName';
+        final filePath = '${Supabase.instance.client.auth.currentUser!.id}/$fileName'; // ✅ owner folder
 
-        final response = await Supabase.instance.client.storage
+        await Supabase.instance.client.storage
             .from('profiles')
             .uploadBinary(
           filePath,
@@ -321,28 +328,11 @@ class _UserProfileScreenState extends State<UserProfileScreen>
             .getPublicUrl(filePath);
 
         setState(() => _profileImageUrl = url);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Profile image uploaded successfully!'),
-            backgroundColor: const Color(0xFF49e8c3),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        );
+        GlobalErrorHandler.showCustomSuccess('Profile image uploaded successfully!');
       } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error uploading image: $e'),
-            backgroundColor: Colors.red.shade400,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        );
+        GlobalErrorHandler.showCustomError('Error uploading image. Please try again.');
+      } finally {
+        setState(() => _isLoading = false);
       }
     }
   }
@@ -358,28 +348,9 @@ class _UserProfileScreenState extends State<UserProfileScreen>
       });
 
       setState(() => _isEditing = false);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('✅ Profile updated successfully!'),
-          backgroundColor: const Color(0xFF49e8c3),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      );
+      GlobalErrorHandler.showCustomSuccess('Profile updated successfully!');
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.red.shade400,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      );
+      GlobalErrorHandler.showCustomError('Failed to update profile.');
     } finally {
       setState(() => _isLoading = false);
     }
@@ -389,16 +360,19 @@ class _UserProfileScreenState extends State<UserProfileScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFF1D3B27),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
         ),
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to logout?'),
+        title: const Text('Logout', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Are you sure you want to logout?',
+          style: TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
@@ -420,6 +394,152 @@ class _UserProfileScreenState extends State<UserProfileScreen>
       if (mounted) {
         context.go('/role-selection');
       }
+    }
+  }
+
+  // ============================================================
+  // DELETE ACCOUNT (FIXED)
+  // ============================================================
+  Future<void> _deleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1D3B27),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            SizedBox(width: 8),
+            Text('Delete Account?', style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        content: const Text(
+          'This action cannot be undone. All your data (profile, requests, chats) will be permanently deleted.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text('Delete Forever'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() => _isDeleting = true);
+
+      final success = await GlobalErrorHandler.run<bool>(
+        context: context,
+        action: () async {
+          final userId = Supabase.instance.client.auth.currentUser?.id;
+          if (userId == null) throw Exception('User not found');
+
+          // ✅ 1. Fetch user data to find storage file URLs
+          final userProfile = await Supabase.instance.client
+              .from('users')
+              .select('profile_image, cnic_front_image, cnic_back_image, face_image')
+              .eq('id', userId)
+              .maybeSingle();
+
+          // ✅ 2. Delete profile image
+          if (userProfile != null && userProfile['profile_image'] != null) {
+            await _deleteStorageFile('profiles', userProfile['profile_image']);
+          }
+
+          // ✅ 3. Delete verification images (new private table + legacy columns)
+          final verification = await SupabaseService().getMyVerification();
+          if (verification != null) {
+            for (var key in ['cnic_front_path', 'cnic_back_path', 'face_path']) {
+              final String? path = verification[key];
+              if (path != null && path.isNotEmpty) {
+                await _deleteStorageFile('verification_images', path);
+              }
+            }
+          }
+          if (userProfile != null) {
+            for (var key in ['cnic_front_image', 'cnic_back_image', 'face_image']) {
+              final String? url = userProfile[key];
+              if (url != null && url.isNotEmpty) {
+                await _deleteStorageFile('verification_images', url);
+              }
+            }
+          }
+
+          // ✅ 4. Delete portfolio media (if provider)
+          try {
+            // ✅ portfolio is keyed by providers.id, not users.id
+            final provider = await Supabase.instance.client
+                .from('providers')
+                .select('id')
+                .eq('user_id', userId)
+                .maybeSingle();
+            if (provider != null) {
+              final portfolioItems = await Supabase.instance.client
+                  .from('provider_portfolio')
+                  .select('media_url')
+                  .eq('provider_id', provider['id']);
+              for (var item in portfolioItems) {
+                final String mediaUrl = item['media_url'] ?? '';
+                if (mediaUrl.isNotEmpty) {
+                  await _deleteStorageFile('portfolio_media', mediaUrl);
+                }
+              }
+            }
+          } catch (e) {
+            debugPrint('⚠️ Portfolio cleanup: $e');
+          }
+
+          // ✅ 5. Delete database rows + auth user via SQL
+          await Supabase.instance.client.rpc('delete_my_account');
+          return true;
+        },
+      );
+
+      if (success == true && mounted) {
+        await context.read<AuthProvider>().logout();
+        if (mounted) {
+          GlobalErrorHandler.showCustomSuccess('Your account has been deleted.');
+          context.go('/role-selection');
+        }
+      } else {
+        if (mounted) setState(() => _isDeleting = false);
+      }
+    }
+  }
+
+  // ✅ Helper: Deletes a file from a bucket given its public URL
+  Future<void> _deleteStorageFile(String bucket, String publicUrl) async {
+    try {
+      // ✅ New uploads store a plain storage path (e.g. verification images)
+      if (!publicUrl.startsWith('http')) {
+        await Supabase.instance.client.storage.from(bucket).remove([publicUrl]);
+        debugPrint('✅ Deleted $bucket/$publicUrl');
+        return;
+      }
+      final uri = Uri.parse(publicUrl);
+      final pathSegments = uri.pathSegments;
+      final int bucketIndex = pathSegments.indexOf(bucket);
+      if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
+        final String filePath = pathSegments.sublist(bucketIndex + 1).join('/');
+        await Supabase.instance.client.storage.from(bucket).remove([filePath]);
+        debugPrint('✅ Deleted $bucket/$filePath');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Failed to delete from $bucket: $e');
     }
   }
 
@@ -448,6 +568,8 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                   pinned: true,
                   backgroundColor: Colors.transparent,
                   elevation: 0,
+                  // ✅ FIX: Hide the default Flutter back button
+                  automaticallyImplyLeading: false,
                   flexibleSpace: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     child: Row(
@@ -461,10 +583,14 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
                                 color: Colors.white.withOpacity(0.06),
-                                width: 3,
+                                width: 1,
                               ),
                             ),
-
+                            child: const Icon(
+                              Icons.arrow_back_rounded,
+                              color: Colors.white,
+                              size: 22,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -511,9 +637,9 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                   padding: const EdgeInsets.all(16),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate([
-                      // ============================================================
-                      // PROFILE HEADER
-                      // ============================================================
+                      // ... (rest of the profile UI stays the same) ...
+                      // ... (Header, Card, etc.) ...
+
                       Center(
                         child: Column(
                           children: [
@@ -629,15 +755,13 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                       ),
                       const SizedBox(height: 24),
 
-                      // ============================================================
-                      // PROFILE INFORMATION CARD
-                      // ============================================================
                       _buildGlassCard(
                         child: Padding(
                           padding: const EdgeInsets.all(20),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              // ... (Personal Information Card content stays the same) ...
                               Row(
                                 children: [
                                   Container(
@@ -735,7 +859,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                                   Container(
                                     width: 8,
                                     height: 8,
-                                    decoration: BoxDecoration(
+                                    decoration: const BoxDecoration(
                                       color: Colors.amber,
                                       shape: BoxShape.circle,
                                     ),
@@ -756,9 +880,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                       ),
                       const SizedBox(height: 16),
 
-                      // ============================================================
-                      // SAVE BUTTON
-                      // ============================================================
                       if (_isEditing)
                         SizedBox(
                           width: double.infinity,
@@ -773,9 +894,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                         ),
                       if (_isEditing) const SizedBox(height: 16),
 
-                      // ============================================================
-                      // MENU ITEMS
-                      // ============================================================
                       _buildMenuItem(
                         icon: Icons.favorite_rounded,
                         iconColor: Colors.red,
@@ -785,7 +903,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                         },
                       ),
                       const SizedBox(height: 8),
-
                       _buildMenuItem(
                         icon: Icons.history_rounded,
                         iconColor: const Color(0xFFFF6B6B),
@@ -795,7 +912,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                         },
                       ),
                       const SizedBox(height: 8),
-
                       _buildMenuItem(
                         icon: Icons.chat_bubble_outline_rounded,
                         iconColor: const Color(0xFF4D96FF),
@@ -805,7 +921,6 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                         },
                       ),
                       const SizedBox(height: 8),
-
                       _buildMenuItem(
                         icon: Icons.notifications_outlined,
                         iconColor: const Color(0xFFFFB74D),
@@ -816,37 +931,61 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                         },
                       ),
                       const SizedBox(height: 8),
-
                       _buildMenuItem(
                         icon: Icons.settings_rounded,
                         iconColor: Colors.grey.shade400,
                         title: 'Settings',
-                        onTap: () {
-                          // Navigate to settings
-                        },
+                        onTap: () {},
                       ),
                       const SizedBox(height: 8),
-
                       _buildMenuItem(
                         icon: Icons.help_outline_rounded,
                         iconColor: const Color(0xFF6C63FF),
                         title: 'Help & Support',
-                        onTap: () {
-                          // Navigate to help
-                        },
+                        onTap: () {},
                       ),
                       const SizedBox(height: 8),
+                      _buildMenuItem(
+                        icon: Icons.privacy_tip_outlined,
+                        iconColor: const Color(0xFF49e8c3),
+                        title: 'Privacy Policy',
+                        onTap: () => context.push('/legal/privacy'),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMenuItem(
+                        icon: Icons.description_outlined,
+                        iconColor: const Color(0xFF49e8c3),
+                        title: 'Terms of Service',
+                        onTap: () => context.push('/legal/terms'),
+                      ),
+                      const SizedBox(height: 24),
 
                       // ============================================================
-                      // LOGOUT
+                      // LOGOUT & DELETE ACCOUNT
                       // ============================================================
                       _buildMenuItem(
                         icon: Icons.logout_rounded,
-                        iconColor: Colors.red,
+                        iconColor: Colors.orange,
                         title: 'Logout',
-                        isDestructive: true,
                         onTap: _logout,
                       ),
+                      const SizedBox(height: 8),
+
+                      // ✅ DELETE ACCOUNT BUTTON
+                      _buildMenuItem(
+                        icon: Icons.delete_forever_rounded,
+                        iconColor: Colors.red,
+                        title: 'Delete Account',
+                        isDestructive: true,
+                        onTap: _isDeleting ? null : _deleteAccount,
+                      ),
+                      if (_isDeleting)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          child: Center(
+                            child: CircularProgressIndicator(color: Colors.red),
+                          ),
+                        ),
                       const SizedBox(height: 32),
                     ]),
                   ),
@@ -894,7 +1033,7 @@ class _UserProfileScreenState extends State<UserProfileScreen>
                 controller: controller,
                 enabled: enabled,
                 keyboardType: keyboardType,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w500,
                   color: Colors.white,

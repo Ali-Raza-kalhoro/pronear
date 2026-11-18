@@ -1,7 +1,9 @@
 // lib/app/routes.dart
 import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../features/auth/forget_pasword_screen.dart';
 import '../features/provider/business_setup/BusinessProductsListScreen.dart';
 import '../features/provider/business_setup/business_category_selection_screen.dart';
 import '../features/provider/business_setup/business_products_setup_screen.dart';
@@ -25,6 +27,9 @@ import '../features/user/provider_detail_screen.dart';
 import '../features/user/request_screen.dart' as user_request;
 import '../features/user/chat_screen.dart' as user_chat;
 import '../features/user/profile_screen.dart';
+import '../features/user/my_requests_screen.dart';
+import '../features/legal/legal_screen.dart';
+import '../features/user/favorites_screen.dart';
 import '../features/provider/dashboard_screen.dart';
 import '../features/provider/cv_creation_screen.dart';
 import '../features/provider/chat_screen.dart' as provider_chat;
@@ -32,8 +37,28 @@ import '../features/provider/profile_screen.dart' as provider_profile;
 import '../features/chat/chat_list_screen.dart';
 
 class AppRouter {
+  // Screens reachable without a logged-in session
+  static const _publicRoutes = {
+    '/splash',
+    '/role-selection',
+    '/login',
+    '/register',
+    '/forgot-password',
+    '/legal/privacy',
+    '/legal/terms',
+    '/legal/delete-account',
+  };
+
   static final router = GoRouter(
     initialLocation: '/splash',
+    // ✅ Auth guard: any private screen without a session → role selection
+    redirect: (context, state) {
+      final loggedIn = Supabase.instance.client.auth.currentSession != null;
+      if (!loggedIn && !_publicRoutes.contains(state.matchedLocation)) {
+        return '/role-selection';
+      }
+      return null;
+    },
     routes: [
       GoRoute(
         path: '/splash',
@@ -72,6 +97,27 @@ class AppRouter {
           }
           return RegisterScreen(role: role);
         },
+      ),
+
+      // ✅ NEW: Forgot Password (OTP-based reset)
+      GoRoute(
+        path: '/forgot-password',
+        name: 'forgot-password',
+        builder: (context, state) => ForgotPasswordScreen(),
+      ),
+
+      // ✅ Legal pages (public – reachable from login / register)
+      GoRoute(
+        path: '/legal/privacy',
+        builder: (context, state) => const LegalScreen(page: LegalPage.privacy),
+      ),
+      GoRoute(
+        path: '/legal/terms',
+        builder: (context, state) => const LegalScreen(page: LegalPage.terms),
+      ),
+      GoRoute(
+        path: '/legal/delete-account',
+        builder: (context, state) => const LegalScreen(page: LegalPage.deletion),
       ),
 
       // ============================================================
@@ -138,6 +184,16 @@ class AppRouter {
         path: '/user/profile',
         name: 'user-profile',
         builder: (context, state) => const UserProfileScreen(),
+      ),
+      GoRoute(
+        path: '/user/requests',
+        name: 'user-requests',
+        builder: (context, state) => const MyRequestsScreen(),
+      ),
+      GoRoute(
+        path: '/user/favorites',
+        name: 'user-favorites',
+        builder: (context, state) => const FavoritesScreen(),
       ),
       GoRoute(
         path: '/user/notifications',

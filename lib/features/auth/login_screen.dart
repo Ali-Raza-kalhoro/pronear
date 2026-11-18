@@ -6,7 +6,9 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../app/theme.dart';
+import '../../core/services/global_error_handler.dart';
 import '../../widgets/loading_button.dart';
+import '../legal/legal_screen.dart';
 import '../provider/auth_provider.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -24,7 +26,6 @@ class _LoginScreenState extends State<LoginScreen>
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
 
-  // Background Animation Controllers
   late AnimationController _pulseController;
   late AnimationController _floatingController;
 
@@ -51,9 +52,6 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
-  // ============================================================
-  // BACKGROUND
-  // ============================================================
   Widget _buildBackground(Size size) {
     return Positioned.fill(
       child: IgnorePointer(
@@ -257,9 +255,6 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ============================================================
-  // BUILD
-  // ============================================================
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -279,7 +274,6 @@ class _LoginScreenState extends State<LoginScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Back Button
                     GestureDetector(
                       onTap: () => context.pop(),
                       child: Container(
@@ -301,11 +295,9 @@ class _LoginScreenState extends State<LoginScreen>
                     ),
                     const SizedBox(height: 20),
 
-                    // Logo & Header
                     Center(
                       child: Column(
                         children: [
-                          // Logo
                           Container(
                             width: 140,
                             height: 130,
@@ -343,7 +335,6 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                           const SizedBox(height: 24),
 
-                          // Welcome Text
                           Text(
                             'Welcome Back!',
                             style: TextStyle(
@@ -370,13 +361,11 @@ class _LoginScreenState extends State<LoginScreen>
 
                     const SizedBox(height: 36),
 
-                    // Form
                     Form(
                       key: _formKey,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Email Field
                           _buildInputField(
                             controller: _emailController,
                             label: 'Email Address',
@@ -393,7 +382,6 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                           const SizedBox(height: 20),
 
-                          // Password Field
                           _buildInputField(
                             controller: _passwordController,
                             label: 'Password',
@@ -403,7 +391,7 @@ class _LoginScreenState extends State<LoginScreen>
                             suffixIcon: IconButton(
                               icon: Icon(
                                 _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                                color: Colors.grey.shade500,
+                                color: Colors.white70, // ✅ Changed to white
                                 size: 20,
                               ),
                               onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
@@ -416,21 +404,11 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                           const SizedBox(height: 8),
 
-                          // Forgot Password
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton(
                               onPressed: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: const Text('Password reset feature coming soon!'),
-                                    backgroundColor: Colors.white.withOpacity(0.1),
-                                    behavior: SnackBarBehavior.floating,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                );
+                                context.push('/forgot-password');
                               },
                               style: TextButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -447,32 +425,48 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                           const SizedBox(height: 24),
 
-                          // Sign In Button
                           SizedBox(
                             width: double.infinity,
                             height: 56,
                             child: LoadingButton(
                               onPressed: () async {
                                 if (_formKey.currentState?.validate() ?? false) {
-                                  final success = await authProvider.login(
-                                    _emailController.text.trim(),
-                                    _passwordController.text,
-                                  );
-                                  if (success && mounted) {
+                                  final email = _emailController.text.trim();
+                                  final password = _passwordController.text;
+
+                                  final success = await authProvider.login(email, password);
+
+                                  if (success == true && mounted) {
                                     await Future.delayed(const Duration(milliseconds: 200));
-                                    final role = authProvider.userRole;
                                     await authProvider.loadUserProfile();
                                     final refreshedRole = authProvider.userRole;
 
-                                    if (refreshedRole == 'provider') {
+                                    // ✅ 'business' accounts are providers too (same as splash)
+                                    if (refreshedRole == 'provider' || refreshedRole == 'business') {
                                       final hasCV = await _checkProviderCV(authProvider.userId!);
+                                      if (!mounted) return;
                                       if (hasCV) {
                                         context.go('/provider/dashboard');
+                                      } else if (refreshedRole == 'business') {
+                                        // Setup not finished → continue onboarding
+                                        context.go('/business/type');
                                       } else {
                                         context.go('/provider/cv');
                                       }
                                     } else {
+                                      if (!mounted) return;
                                       context.go('/user/home');
+                                    }
+                                  }
+                                  else {
+                                    final errorMsg = authProvider.error ?? 'Login failed. Please check your credentials.';
+
+                                    if (errorMsg.contains('Invalid login credentials')) {
+                                      GlobalErrorHandler.showCustomError('Incorrect email or password. If you don\'t have an account, please Sign Up.');
+                                    } else if (errorMsg.contains('Email not confirmed')) {
+                                      GlobalErrorHandler.showCustomError('Please verify your email address before logging in.');
+                                    } else {
+                                      GlobalErrorHandler.showCustomError('Login failed. Please check your internet and try again.');
                                     }
                                   }
                                 }
@@ -485,7 +479,6 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                           const SizedBox(height: 20),
 
-                          // Divider
                           Row(
                             children: [
                               Expanded(
@@ -530,7 +523,6 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                           const SizedBox(height: 20),
 
-                          // Sign Up
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
@@ -560,6 +552,16 @@ class _LoginScreenState extends State<LoginScreen>
                         ],
                       ),
                     ),
+                    const SizedBox(height: 12),
+                    // ✅ Legal links (required by Play Store)
+                    Text(
+                      'By continuing you agree to our',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.5),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const LegalLinksRow(),
                     const SizedBox(height: 20),
                   ],
                 ),
@@ -571,9 +573,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ============================================================
-  // INPUT FIELD
-  // ============================================================
+  // ✅ TRANSPARENT TEXT FIELD (Matches product setup)
   Widget _buildInputField({
     required TextEditingController controller,
     required String label,
@@ -584,93 +584,56 @@ class _LoginScreenState extends State<LoginScreen>
     Widget? suffixIcon,
     String? Function(String?)? validator,
   }) {
-    return Container(
-      decoration: BoxDecoration(
+    return TextFormField(
+      controller: controller,
+      obscureText: obscureText,
+      keyboardType: keyboardType,
+      style: const TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w500,
         color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
       ),
-      child: TextFormField(
-        controller: controller,
-        obscureText: obscureText,
-        keyboardType: keyboardType,
-        style: const TextStyle(
-          color: Colors.black,
-          fontSize: 15,
-          fontWeight: FontWeight.w500,
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(
+          color: Colors.white70,
+          fontSize: 13,
         ),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle: TextStyle(
-            color: Colors.grey.shade600,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-          ),
-          hintText: hint,
-          hintStyle: TextStyle(
-            color: Colors.grey.shade400,
-            fontSize: 14,
-            fontWeight: FontWeight.w400,
-          ),
-          prefixIcon: Icon(
-            icon,
-            color: const Color(0xFF49e8c3),
-            size: 22,
-          ),
-          suffixIcon: suffixIcon,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(
-              color: Colors.grey.shade300,
-              width: 1,
-            ),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(
-              color: Colors.grey.shade300,
-              width: 1,
-            ),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(
-              color: Color(0xFF49e8c3),
-              width: 2,
-            ),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(
-              color: Colors.red.shade300,
-              width: 1,
-            ),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(
-              color: Colors.red.shade400,
-              width: 2,
-            ),
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 16,
-          ),
-          errorStyle: TextStyle(
-            color: Colors.red.shade400,
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
+        hintText: hint,
+        hintStyle: TextStyle(
+          color: Colors.white.withOpacity(0.5),
+          fontSize: 14,
         ),
-        validator: validator,
+        prefixIcon: Icon(
+          icon,
+          color: Colors.white70,
+          size: 22,
+        ),
+        suffixIcon: suffixIcon,
+        filled: true,
+        fillColor: Colors.white.withOpacity(0.1),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.3)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Colors.white, width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Colors.red, width: 1),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Colors.red, width: 2),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
       ),
+      validator: validator,
     );
   }
 
@@ -682,7 +645,7 @@ class _LoginScreenState extends State<LoginScreen>
           .eq('user_id', userId);
       return providers.isNotEmpty;
     } catch (e) {
-      print('❌ Error checking provider CV: $e');
+      debugPrint('❌ Error checking provider CV: $e');
       return false;
     }
   }

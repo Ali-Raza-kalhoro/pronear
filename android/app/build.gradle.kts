@@ -1,11 +1,20 @@
 // android/app/build.gradle.kts
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Release signing: values come from android/key.properties (never commit that file).
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+
 android {
-    namespace = "com.example.near_pro1"
+    namespace = "com.pronear.app"
     compileSdk = 36
 
     ndkVersion = flutter.ndkVersion
@@ -17,17 +26,35 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.near_pro1"
-        minSdk =28
+        applicationId = "com.pronear.app"
+        minSdk = 28
         targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
     }
 
+    signingConfigs {
+        create("release") {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                // Fallback so `flutter run --release` still works locally.
+                // Play Console will REJECT this build: create key.properties first (FIX_GUIDE.md, step M1).
+                logger.warn("WARNING: android/key.properties missing - release build is signed with the DEBUG key.")
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

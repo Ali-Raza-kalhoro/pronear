@@ -282,7 +282,13 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
         setState(() {
           _newRequests = requests.where((r) => r['status'] == 'pending').toList();
           _completedJobs = requests.where((r) => r['status'] == 'completed').length;
-          _totalEarnings = _completedJobs * 500.0;
+          // ✅ Real earnings = sum of budget/total of completed jobs (was a fake 500 × jobs)
+          _totalEarnings = requests
+              .where((r) => r['status'] == 'completed')
+              .fold<double>(0, (sum, r) {
+            final v = r['total_amount'] ?? r['budget'];
+            return sum + (v is num ? v.toDouble() : double.tryParse('$v') ?? 0);
+          });
         });
 
         final notifications = await SupabaseService().getNotifications(userId);
@@ -1253,7 +1259,7 @@ class _ProviderDashboardScreenState extends State<ProviderDashboardScreen>
   Widget _buildBottomNavBar() {
     return BottomNavigationBar(
       type: BottomNavigationBarType.fixed,
-      backgroundColor: Colors.transparent,
+      backgroundColor: Color(0xFF1d3b27),
       selectedItemColor: const Color(0xFF49e8c3),
       unselectedItemColor: Colors.white.withOpacity(0.4),
       selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 10, letterSpacing: 0.3),
